@@ -1,5 +1,6 @@
 ﻿using nexo.Middleware;
 using nexo.Options;
+using StackExchange.Redis;
 using System.Threading.RateLimiting;
 
 namespace nexo.Extensions;
@@ -74,6 +75,38 @@ public static class ServiceCollectionExtensions
                     QueueProcessingOrder = QueueProcessingOrder.OldestFirst
                 });
             });
+        });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a long-lived Redis connection multiplexer. The multiplexer is thread-safe and
+    /// designed to be shared for the lifetime of the app, so it is registered as a singleton.
+    /// Connection failures do not crash startup: StackExchange.Redis retries in the background,
+    /// and callers must be prepared to handle a temporarily unavailable connection.
+    /// </summary>
+    public static IServiceCollection AddNexoRedis(this IServiceCollection services, IConfiguration configuration)
+    {
+        var redisSettings = configuration.GetSection(RedisSettings.SectionName).Get<RedisSettings>()
+            ?? new RedisSettings();
+
+        services.AddSingleton<IConnectionMultiplexer>(serviceProvider =>
+        {
+            var configurationOptions = ConfigurationOptions.Parse(redisSettings.ConnectionString);
+            configurationOptions.AbortOnConnectFail = false;
+
+            var logger = serviceProvider.GetRequiredService<ILogger<IConnectionMultiplexer>>();
+
+            var multiplexer = ConnectionMultiplexer.Connect(configurationOptions);
+
+            multiplexer.ConnectionFailed += (_, args) =>
+                logger.LogError(args.Exception, "Redis connection failed: {FailureType}", args.FailureType);
+
+            multiplexer.ConnectionRestored += (_, _) =>
+                logger.LogInformation("Redis connection restored.");
+
+            return multiplexer;
         });
 
         return services;

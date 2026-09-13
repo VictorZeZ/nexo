@@ -8,6 +8,7 @@ builder.Services.AddControllers();
 builder.Services.AddNexoProblemDetails();
 builder.Services.AddNexoCors(builder.Configuration);
 builder.Services.AddNexoRateLimiting(builder.Configuration);
+builder.Services.AddNexoRedis(builder.Configuration);
 
 var app = builder.Build();
 

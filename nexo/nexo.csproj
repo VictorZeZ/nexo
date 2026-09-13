@@ -19,4 +19,8 @@
     <Folder Include="WebSockets\Protocol\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="3.2.1" />
+  </ItemGroup>
+
 </Project>
