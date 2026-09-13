@@ -1,0 +1,19 @@
+using nexo.Extensions;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllers();
+
+builder.Services.AddNexoProblemDetails();
+builder.Services.AddNexoCors(builder.Configuration);
+builder.Services.AddNexoRateLimiting(builder.Configuration);
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+app.UseNexoRequestPipeline();
+
+app.MapControllers();
+
+app.Run();

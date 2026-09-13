@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Controllers\" />
+    <Folder Include="Models\" />
+    <Folder Include="BackgroundServices\" />
+    <Folder Include="Validation\" />
+    <Folder Include="Services\" />
+    <Folder Include="Rooms\Models\" />
+    <Folder Include="Signaling\" />
+    <Folder Include="WebSockets\Connection\" />
+    <Folder Include="WebSockets\Handlers\" />
+    <Folder Include="WebSockets\Protocol\" />
+  </ItemGroup>
+
+</Project>
