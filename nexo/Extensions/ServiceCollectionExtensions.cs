@@ -1,5 +1,6 @@
 ﻿using nexo.Middleware;
 using nexo.Options;
+using nexo.WebSockets.Protocol;
 using StackExchange.Redis;
 using System.Threading.RateLimiting;
 
@@ -108,6 +109,20 @@ public static class ServiceCollectionExtensions
 
             return multiplexer;
         });
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the WebSocket protocol parser and its configured structural size limits.
+    /// </summary>
+    public static IServiceCollection AddNexoWebSocketProtocol(this IServiceCollection services, IConfiguration configuration)
+    {
+        var protocolLimits = configuration.GetSection(ProtocolLimitsSettings.SectionName).Get<ProtocolLimitsSettings>()
+            ?? new ProtocolLimitsSettings();
+
+        services.AddSingleton(protocolLimits);
+        services.AddSingleton<ProtocolMessageParser>();
 
         return services;
     }

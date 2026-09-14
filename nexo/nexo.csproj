@@ -16,7 +16,6 @@
     <Folder Include="Signaling\" />
     <Folder Include="WebSockets\Connection\" />
     <Folder Include="WebSockets\Handlers\" />
-    <Folder Include="WebSockets\Protocol\" />
   </ItemGroup>
 
   <ItemGroup>
