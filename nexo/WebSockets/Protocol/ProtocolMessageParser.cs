@@ -5,15 +5,17 @@ using System.Text.Json;
 namespace nexo.WebSockets.Protocol;
 
 /// <summary>
-/// Parses raw incoming WebSocket text into a validated protocol message.
+/// Parses raw incoming WebSocket bytes into a validated protocol message.
 /// Fully isolated from transport and business logic: given the same input it always produces
 /// the same result, and it never touches sockets, rooms, or Redis.
+/// Works directly on UTF-8 bytes so the wire encoding (currently JSON) can be swapped later
+/// without changing any caller or any message type.
 /// </summary>
 public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    public ProtocolParseResult Parse(string rawMessage)
+    public ProtocolParseResult Parse(ReadOnlySpan<byte> rawMessage)
     {
         ProtocolEnvelope envelope;
 
@@ -58,8 +60,7 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
         }
     }
 
-    private ProtocolParseResult ParsePayload<TPayload>(ProtocolEnvelope envelope, Func<TPayload, string?> validate)
-        where TPayload : class
+    private ProtocolParseResult ParsePayload<TPayload>(ProtocolEnvelope envelope, Func<TPayload, string?> validate) where TPayload : class
     {
         var payload = envelope.Payload.Deserialize<TPayload>(SerializerOptions)
             ?? throw new JsonException($"Payload deserialized to null for type {typeof(TPayload).Name}.");
