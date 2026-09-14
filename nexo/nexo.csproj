@@ -14,7 +14,6 @@
     <Folder Include="Services\" />
     <Folder Include="Rooms\Models\" />
     <Folder Include="Signaling\" />
-    <Folder Include="WebSockets\Connection\" />
     <Folder Include="WebSockets\Handlers\" />
   </ItemGroup>
 

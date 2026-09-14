@@ -10,6 +10,7 @@ builder.Services.AddNexoCors(builder.Configuration);
 builder.Services.AddNexoRateLimiting(builder.Configuration);
 builder.Services.AddNexoRedis(builder.Configuration);
 builder.Services.AddNexoWebSocketProtocol(builder.Configuration);
+builder.Services.AddNexoWebSocketConnections(builder.Configuration);
 
 var app = builder.Build();
 
@@ -17,5 +18,6 @@ var app = builder.Build();
 app.UseNexoRequestPipeline();
 
 app.MapControllers();
+app.MapNexoWebSocketEndpoint();
 
 app.Run();

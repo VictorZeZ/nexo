@@ -1,7 +1,11 @@
-﻿namespace nexo.Extensions;
+﻿using nexo.Options;
+using nexo.WebSockets.Connection;
+using nexo.WebSockets.Protocol;
+
+namespace nexo.Extensions;
 
 /// <summary>
-/// Wires up cross-cutting middleware in the correct pipeline order, keeping Program.cs minimal.
+/// Wires up cross-cutting middleware and top-level endpoints, keeping Program.cs minimal.
 /// </summary>
 public static class WebApplicationExtensions
 {
@@ -12,11 +16,49 @@ public static class WebApplicationExtensions
 
         app.UseHttpsRedirection();
 
+        var webSocketSettings = app.Services.GetRequiredService<WebSocketConnectionSettings>();
+        app.UseWebSockets(new WebSocketOptions
+        {
+            KeepAliveInterval = TimeSpan.FromSeconds(webSocketSettings.KeepAliveIntervalSeconds)
+        });
+
         app.UseCors(ServiceCollectionExtensions.CorsPolicyName);
 
         app.UseRateLimiter();
 
         app.UseAuthorization();
+
+        return app;
+    }
+
+    /// <summary>
+    /// Maps the WebSocket upgrade endpoint. Each accepted connection is handed off to a
+    /// <see cref="WebSocketConnection"/>, which owns its full lifecycle from there.
+    /// </summary>
+    public static WebApplication MapNexoWebSocketEndpoint(this WebApplication app)
+    {
+        app.MapGet("/ws", async (
+            HttpContext context,
+            ProtocolMessageParser parser,
+            WebSocketConnectionSettings settings,
+            ILoggerFactory loggerFactory) =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+
+            await using var connection = new WebSocketConnection(
+                socket,
+                parser,
+                settings,
+                loggerFactory.CreateLogger<WebSocketConnection>());
+
+            await connection.RunAsync(context.RequestAborted);
+        });
 
         return app;
     }

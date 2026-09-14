@@ -126,4 +126,17 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Registers structural limits and transport settings for the WebSocket connection layer.
+    /// </summary>
+    public static IServiceCollection AddNexoWebSocketConnections(this IServiceCollection services, IConfiguration configuration)
+    {
+        var settings = configuration.GetSection(WebSocketConnectionSettings.SectionName).Get<WebSocketConnectionSettings>()
+            ?? new WebSocketConnectionSettings();
+
+        services.AddSingleton(settings);
+
+        return services;
+    }
 }
