@@ -1,6 +1,7 @@
 ﻿using nexo.Middleware;
 using nexo.Options;
 using nexo.Rooms;
+using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
 using StackExchange.Redis;
 using System.Threading.RateLimiting;
@@ -142,8 +143,9 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers room management: server-side room state, membership, capacity, and private-room
-    /// password verification, backed by Redis.
+    /// Registers room management: server-side room state, membership, capacity, private-room
+    /// password verification, chat history storage, live connection tracking, and the message
+    /// handler that ties rooms to the WebSocket layer.
     /// </summary>
     public static IServiceCollection AddNexoRooms(this IServiceCollection services, IConfiguration configuration)
     {
@@ -152,6 +154,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(roomSettings);
         services.AddSingleton<RoomManager>();
+        services.AddSingleton<RoomConnectionRegistry>();
+        services.AddSingleton<ChatHistoryStore>();
+        services.AddSingleton<RoomMessageHandler>();
 
         return services;
     }

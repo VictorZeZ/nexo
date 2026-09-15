@@ -1,4 +1,5 @@
 ﻿using nexo.Options;
+using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
 using System.Buffers;
 using System.Net.WebSockets;
@@ -8,9 +9,9 @@ namespace nexo.WebSockets.Connection;
 
 /// <summary>
 /// Owns the full lifecycle of a single WebSocket connection: receiving and reassembling
-/// application messages, parsing them via <see cref="ProtocolMessageParser"/>, and serializing
-/// all outbound sends through a single dedicated queue so concurrent sends never race on the
-/// same socket. No room or business logic lives here (see later steps).
+/// application messages, parsing them via <see cref="ProtocolMessageParser"/>, dispatching valid
+/// messages to <see cref="RoomMessageHandler"/>, and serializing all outbound sends through a
+/// single dedicated queue so concurrent sends never race on the same socket.
 /// </summary>
 public sealed class WebSocketConnection : IAsyncDisposable
 {
@@ -20,8 +21,25 @@ public sealed class WebSocketConnection : IAsyncDisposable
     /// </summary>
     public Guid ConnectionId { get; } = Guid.NewGuid();
 
+    /// <summary>
+    /// The room-scoped identity used for membership, ownership, and relay attribution. Currently
+    /// just the connection's own ID, since no permanent user-identity system exists yet.
+    /// </summary>
+    public string ParticipantId => ConnectionId.ToString();
+
+    /// <summary>The room this connection currently belongs to, if any. Owned by the handler layer.</summary>
+    public string? CurrentRoomId { get; set; }
+
+    /// <summary>
+    /// Optional cleanup invoked once the connection has fully stopped. Used by higher layers
+    /// (e.g. room membership) to release connection-specific state without coupling this class
+    /// to room or business logic.
+    /// </summary>
+    public Func<WebSocketConnection, Task>? OnClosedAsync { get; set; }
+
     private readonly WebSocket _socket;
     private readonly ProtocolMessageParser _parser;
+    private readonly RoomMessageHandler _roomMessageHandler;
     private readonly WebSocketConnectionSettings _settings;
     private readonly ILogger<WebSocketConnection> _logger;
     private readonly Channel<byte[]> _outbox;
@@ -31,11 +49,13 @@ public sealed class WebSocketConnection : IAsyncDisposable
     public WebSocketConnection(
         WebSocket socket,
         ProtocolMessageParser parser,
+        RoomMessageHandler roomMessageHandler,
         WebSocketConnectionSettings settings,
         ILogger<WebSocketConnection> logger)
     {
         _socket = socket;
         _parser = parser;
+        _roomMessageHandler = roomMessageHandler;
         _settings = settings;
         _logger = logger;
 
@@ -70,8 +90,7 @@ public sealed class WebSocketConnection : IAsyncDisposable
 
     /// <summary>
     /// Runs the connection until it closes, either because the client disconnected, the server
-    /// requested shutdown via <paramref name="hostShutdownToken"/>, or the connection was aborted
-    /// (e.g. an oversized message or a full outbound queue).
+    /// requested shutdown via <paramref name="hostShutdownToken"/>, or the connection was aborted.
     /// </summary>
     public async Task RunAsync(CancellationToken hostShutdownToken)
     {
@@ -81,6 +100,18 @@ public sealed class WebSocketConnection : IAsyncDisposable
         var sendTask = SendLoopAsync(linkedCts.Token);
 
         await receiveTask;
+
+        if (OnClosedAsync is not null)
+        {
+            try
+            {
+                await OnClosedAsync(this);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unhandled exception while cleaning up connection {ConnectionId}.", ConnectionId);
+            }
+        }
 
         _outbox.Writer.TryComplete();
         linkedCts.Cancel();
@@ -125,7 +156,8 @@ public sealed class WebSocketConnection : IAsyncDisposable
 
                 // Text and binary frames are treated identically: the protocol is encoding-agnostic
                 // (see ProtocolMessageParser), so the wire encoding can change later without touching this loop.
-                HandleParsedMessage(_parser.Parse(new ReadOnlySpan<byte>(_receiveBuffer, 0, totalBytesReceived)));
+                var parseResult = _parser.Parse(new ReadOnlySpan<byte>(_receiveBuffer, 0, totalBytesReceived));
+                await HandleParsedMessageAsync(parseResult, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -138,13 +170,22 @@ public sealed class WebSocketConnection : IAsyncDisposable
         }
     }
 
-    private void HandleParsedMessage(ProtocolParseResult parseResult)
+    private async Task HandleParsedMessageAsync(ProtocolParseResult parseResult, CancellationToken cancellationToken)
     {
         if (parseResult.IsSuccess)
         {
-            // No room or business logic exists yet — wired up in a later step. For now, correctly
-            // receiving, reassembling, and validating a message is the full scope of this step.
-            _logger.LogDebug("Connection {ConnectionId} sent a valid {MessageType} message.", ConnectionId, parseResult.MessageType);
+            try
+            {
+                await _roomMessageHandler.HandleAsync(this, parseResult.MessageType!.Value, parseResult.Payload!, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(
+                    ex,
+                    "Unhandled exception while handling a {MessageType} message on connection {ConnectionId}.",
+                    parseResult.MessageType, ConnectionId);
+            }
+
             return;
         }
 

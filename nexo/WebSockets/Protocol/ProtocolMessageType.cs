@@ -9,11 +9,12 @@ public enum ProtocolMessageType
 {
     Unknown = 0,
 
-    // Room lifecycle (client -> server)
+    // Room lifecycle (client -> server, and RoomJoined server -> client)
     JoinRoom = 1,
     LeaveRoom = 2,
+    RoomJoined = 3,
 
-    // Chat (bidirectional / server -> client, per member)
+    // Chat (bidirectional: ChatMessagePayload from client, ChatHistoryEntry when relayed/server -> client)
     ChatMessage = 10,
     MessageAck = 11,
     RoomHistory = 12,

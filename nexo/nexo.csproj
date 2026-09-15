@@ -13,7 +13,6 @@
     <Folder Include="Validation\" />
     <Folder Include="Services\" />
     <Folder Include="Signaling\" />
-    <Folder Include="WebSockets\Handlers\" />
   </ItemGroup>
 
   <ItemGroup>

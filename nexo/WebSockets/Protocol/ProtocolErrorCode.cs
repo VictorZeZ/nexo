@@ -10,4 +10,9 @@ public enum ProtocolErrorCode
     UnsupportedProtocolVersion = 2,
     MalformedEnvelope = 3,
     InvalidPayload = 4,
+    InvalidRoomPassword = 5,
+    RoomFull = 6,
+    RoomTemporarilyUnavailable = 7,
+    NotInRoom = 8,
+    AlreadyInRoom = 9,
 }

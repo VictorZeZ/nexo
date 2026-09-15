@@ -8,4 +8,8 @@ public static class RedisKeys
     public static string Room(string roomId) => $"room:{roomId}";
 
     public static string RoomParticipants(string roomId) => $"room:{roomId}:participants";
+
+    public static string RoomHistory(string roomId) => $"room:{roomId}:history";
+
+    public static string RoomMessageIds(string roomId) => $"room:{roomId}:messageIds";
 }

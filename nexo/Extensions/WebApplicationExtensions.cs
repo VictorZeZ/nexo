@@ -1,5 +1,6 @@
 ﻿using nexo.Options;
 using nexo.WebSockets.Connection;
+using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
 
 namespace nexo.Extensions;
@@ -33,13 +34,15 @@ public static class WebApplicationExtensions
 
     /// <summary>
     /// Maps the WebSocket upgrade endpoint. Each accepted connection is handed off to a
-    /// <see cref="WebSocketConnection"/>, which owns its full lifecycle from there.
+    /// <see cref="WebSocketConnection"/>, wired to <see cref="RoomMessageHandler"/> for both
+    /// message dispatch and cleanup on disconnect.
     /// </summary>
     public static WebApplication MapNexoWebSocketEndpoint(this WebApplication app)
     {
         app.MapGet("/ws", async (
             HttpContext context,
             ProtocolMessageParser parser,
+            RoomMessageHandler roomMessageHandler,
             WebSocketConnectionSettings settings,
             ILoggerFactory loggerFactory) =>
         {
@@ -54,8 +57,11 @@ public static class WebApplicationExtensions
             await using var connection = new WebSocketConnection(
                 socket,
                 parser,
+                roomMessageHandler,
                 settings,
                 loggerFactory.CreateLogger<WebSocketConnection>());
+
+            connection.OnClosedAsync = roomMessageHandler.HandleDisconnectedAsync;
 
             await connection.RunAsync(context.RequestAborted);
         });
