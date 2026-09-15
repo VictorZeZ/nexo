@@ -12,7 +12,6 @@
     <Folder Include="BackgroundServices\" />
     <Folder Include="Validation\" />
     <Folder Include="Services\" />
-    <Folder Include="Rooms\Models\" />
     <Folder Include="Signaling\" />
     <Folder Include="WebSockets\Handlers\" />
   </ItemGroup>
