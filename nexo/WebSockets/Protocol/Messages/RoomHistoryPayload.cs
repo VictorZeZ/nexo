@@ -13,6 +13,7 @@ public sealed record ChatHistoryEntry
 {
     public required Guid MessageId { get; init; }
     public required string SenderId { get; init; }
+    public required string SenderDisplayName { get; init; }
     public required string Ciphertext { get; init; }
     public required string Nonce { get; init; }
     public Guid? ReplyToMessageId { get; init; }

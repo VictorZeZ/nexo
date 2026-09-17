@@ -4,6 +4,7 @@
 public enum RoomJoinOutcome
 {
     Joined,
+    RoomNotFound,
     InvalidPassword,
     RoomFull,
     TemporarilyUnavailable,

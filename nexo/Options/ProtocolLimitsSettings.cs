@@ -10,6 +10,8 @@ public sealed class ProtocolLimitsSettings
     public const string SectionName = "ProtocolLimits";
 
     public int MaxRoomIdLength { get; init; } = 64;
+    public int MaxRoomNameLength { get; init; } = 64;
+    public int MaxDisplayNameLength { get; init; } = 32;
     public int MaxPasswordLength { get; init; } = 128;
     public int MaxCiphertextLength { get; init; } = 8_000;
     public int MaxNonceLength { get; init; } = 64;

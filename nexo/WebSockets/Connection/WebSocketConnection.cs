@@ -31,6 +31,12 @@ public sealed class WebSocketConnection : IAsyncDisposable
     public string? CurrentRoomId { get; set; }
 
     /// <summary>
+    /// The display name established via SetDisplayName, if any. Purely cosmetic metadata —
+    /// never used for authorization. Required before a room can be created or joined.
+    /// </summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>
     /// Optional cleanup invoked once the connection has fully stopped. Used by higher layers
     /// (e.g. room membership) to release connection-specific state without coupling this class
     /// to room or business logic.

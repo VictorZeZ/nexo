@@ -15,4 +15,6 @@ public enum ProtocolErrorCode
     RoomTemporarilyUnavailable = 7,
     NotInRoom = 8,
     AlreadyInRoom = 9,
+    RoomNotFound = 10,
+    IdentityRequired = 11,
 }

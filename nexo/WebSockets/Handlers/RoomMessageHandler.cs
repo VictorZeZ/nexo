@@ -22,6 +22,14 @@ public sealed class RoomMessageHandler(
     {
         switch (messageType)
         {
+            case ProtocolMessageType.SetDisplayName:
+                HandleSetDisplayName(connection, (SetDisplayNamePayload)payload);
+                break;
+
+            case ProtocolMessageType.CreateRoom:
+                await HandleCreateRoomAsync(connection, (CreateRoomPayload)payload, cancellationToken);
+                break;
+
             case ProtocolMessageType.JoinRoom:
                 await HandleJoinRoomAsync(connection, (JoinRoomPayload)payload, cancellationToken);
                 break;
@@ -59,8 +67,70 @@ public sealed class RoomMessageHandler(
         await roomManager.LeaveRoomAsync(roomId, connection.ParticipantId, CancellationToken.None);
     }
 
+    private void HandleSetDisplayName(WebSocketConnection connection, SetDisplayNamePayload payload)
+    {
+        connection.DisplayName = payload.DisplayName.Trim();
+
+        logger.LogInformation("Connection {ConnectionId} set its display name.", connection.ConnectionId);
+
+        connection.TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.IdentityConfirmed, new IdentityConfirmedPayload
+        {
+            DisplayName = connection.DisplayName
+        }));
+    }
+
+    private async Task HandleCreateRoomAsync(WebSocketConnection connection, CreateRoomPayload payload, CancellationToken cancellationToken)
+    {
+        if (connection.DisplayName is null)
+        {
+            SendError(connection, ProtocolErrorCode.IdentityRequired, "You must set a display name before creating a room.");
+            return;
+        }
+
+        if (connection.CurrentRoomId is not null)
+        {
+            SendError(connection, ProtocolErrorCode.AlreadyInRoom, "You must leave your current room before creating another.");
+            return;
+        }
+
+        var createResult = await roomManager.CreateRoomAsync(
+            payload.RoomName,
+            connection.ParticipantId,
+            connection.DisplayName,
+            payload.Visibility,
+            payload.Password,
+            cancellationToken);
+
+        if (!createResult.IsSuccess)
+        {
+            SendError(connection, ProtocolErrorCode.RoomTemporarilyUnavailable, "Could not create the room.");
+            return;
+        }
+
+        logger.LogInformation("Connection {ConnectionId} created room {RoomId}.", connection.ConnectionId, createResult.RoomId);
+
+        // The creator automatically joins the room they just created. Reusing JoinRoomAsync
+        // (rather than a bespoke path) keeps capacity handling and TTL refresh in exactly one place.
+        var joinResult = await roomManager.JoinRoomAsync(createResult.RoomId!, connection.ParticipantId, payload.Password, cancellationToken);
+
+        if (!joinResult.IsSuccess)
+        {
+            // Extremely unlikely for a room that was just created, but handled rather than assumed away.
+            SendError(connection, ProtocolErrorCode.RoomTemporarilyUnavailable, "Room was created but could not be joined.");
+            return;
+        }
+
+        await CompleteJoinAsync(connection, createResult.RoomId!, joinResult.RoomName!, joinResult.Visibility!.Value, cancellationToken);
+    }
+
     private async Task HandleJoinRoomAsync(WebSocketConnection connection, JoinRoomPayload payload, CancellationToken cancellationToken)
     {
+        if (connection.DisplayName is null)
+        {
+            SendError(connection, ProtocolErrorCode.IdentityRequired, "You must set a display name before joining a room.");
+            return;
+        }
+
         if (connection.CurrentRoomId is not null && connection.CurrentRoomId != payload.RoomId)
         {
             SendError(connection, ProtocolErrorCode.AlreadyInRoom, "You must leave your current room before joining another.");
@@ -73,6 +143,7 @@ public sealed class RoomMessageHandler(
         {
             var errorCode = result.Outcome switch
             {
+                RoomJoinOutcome.RoomNotFound => ProtocolErrorCode.RoomNotFound,
                 RoomJoinOutcome.InvalidPassword => ProtocolErrorCode.InvalidRoomPassword,
                 RoomJoinOutcome.RoomFull => ProtocolErrorCode.RoomFull,
                 RoomJoinOutcome.TemporarilyUnavailable => ProtocolErrorCode.RoomTemporarilyUnavailable,
@@ -83,19 +154,26 @@ public sealed class RoomMessageHandler(
             return;
         }
 
-        connection.CurrentRoomId = payload.RoomId;
-        connectionRegistry.Register(payload.RoomId, connection);
+        await CompleteJoinAsync(connection, payload.RoomId, result.RoomName!, result.Visibility!.Value, cancellationToken);
+    }
 
-        logger.LogInformation("Connection {ConnectionId} joined room {RoomId}.", connection.ConnectionId, payload.RoomId);
+    /// <summary>Shared tail for both a fresh join and a create-then-auto-join: register, confirm, deliver history.</summary>
+    private async Task CompleteJoinAsync(WebSocketConnection connection, string roomId, string roomName, RoomVisibility visibility, CancellationToken cancellationToken)
+    {
+        connection.CurrentRoomId = roomId;
+        connectionRegistry.Register(roomId, connection);
+
+        logger.LogInformation("Connection {ConnectionId} joined room {RoomId}.", connection.ConnectionId, roomId);
 
         connection.TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.RoomJoined, new RoomJoinedPayload
         {
-            RoomId = payload.RoomId,
+            RoomId = roomId,
+            RoomName = roomName,
             ParticipantId = connection.ParticipantId,
-            Visibility = result.Visibility!.Value
+            Visibility = visibility
         }));
 
-        var history = await chatHistoryStore.GetHistoryAsync(payload.RoomId, cancellationToken);
+        var history = await chatHistoryStore.GetHistoryAsync(roomId, cancellationToken);
         connection.TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.RoomHistory, new RoomHistoryPayload
         {
             Messages = history
@@ -129,6 +207,9 @@ public sealed class RoomMessageHandler(
         {
             MessageId = payload.MessageId,
             SenderId = connection.ParticipantId,
+            // Guaranteed set: joining a room (a precondition for reaching this point) requires an
+            // identity to already be established.
+            SenderDisplayName = connection.DisplayName!,
             Ciphertext = payload.Ciphertext,
             Nonce = payload.Nonce,
             ReplyToMessageId = payload.ReplyToMessageId,
@@ -175,6 +256,7 @@ public sealed class RoomMessageHandler(
         var outgoing = new ParticipantSpeakingStatePayload
         {
             ParticipantId = connection.ParticipantId,
+            DisplayName = connection.DisplayName!, // guaranteed set: reaching here requires being in a room
             IsSpeaking = payload.IsSpeaking
         };
 

@@ -1,4 +1,5 @@
 ﻿using nexo.Options;
+using nexo.Rooms.Models;
 using nexo.WebSockets.Protocol.Messages;
 using System.Text.Json;
 
@@ -42,6 +43,8 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
         {
             return envelope.Type switch
             {
+                ProtocolMessageType.SetDisplayName => ParsePayload<SetDisplayNamePayload>(envelope, ValidateSetDisplayName),
+                ProtocolMessageType.CreateRoom => ParsePayload<CreateRoomPayload>(envelope, ValidateCreateRoom),
                 ProtocolMessageType.JoinRoom => ParsePayload<JoinRoomPayload>(envelope, ValidateJoinRoom),
                 ProtocolMessageType.LeaveRoom => ParsePayload<LeaveRoomPayload>(envelope, ValidateLeaveRoom),
                 ProtocolMessageType.ChatMessage => ParsePayload<ChatMessagePayload>(envelope, ValidateChatMessage),
@@ -60,7 +63,8 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
         }
     }
 
-    private ProtocolParseResult ParsePayload<TPayload>(ProtocolEnvelope envelope, Func<TPayload, string?> validate) where TPayload : class
+    private ProtocolParseResult ParsePayload<TPayload>(ProtocolEnvelope envelope, Func<TPayload, string?> validate)
+        where TPayload : class
     {
         var payload = envelope.Payload.Deserialize<TPayload>(SerializerOptions)
             ?? throw new JsonException($"Payload deserialized to null for type {typeof(TPayload).Name}.");
@@ -70,6 +74,32 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
         return validationError is null
             ? ProtocolParseResult.Success(envelope.Type, payload)
             : ProtocolParseResult.Failure(ProtocolErrorCode.InvalidPayload, validationError);
+    }
+
+    private string? ValidateSetDisplayName(SetDisplayNamePayload payload) =>
+        string.IsNullOrWhiteSpace(payload.DisplayName) || payload.DisplayName.Length > limits.MaxDisplayNameLength
+            ? "DisplayName is required and must not exceed the maximum allowed length."
+            : null;
+
+    private string? ValidateCreateRoom(CreateRoomPayload payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.RoomName) || payload.RoomName.Length > limits.MaxRoomNameLength)
+        {
+            return "RoomName is required and must not exceed the maximum allowed length.";
+        }
+
+        switch (payload.Visibility)
+        {
+            case RoomVisibility.Private when string.IsNullOrEmpty(payload.Password) || payload.Password.Length > limits.MaxPasswordLength:
+                return "Password is required for a private room and must not exceed the maximum allowed length.";
+            case RoomVisibility.Public when !string.IsNullOrEmpty(payload.Password):
+                return "Password must not be provided for a public room.";
+            case RoomVisibility.Private:
+            case RoomVisibility.Public:
+                return null;
+            default:
+                return "Visibility must be either Public or Private.";
+        }
     }
 
     private string? ValidateJoinRoom(JoinRoomPayload payload)
