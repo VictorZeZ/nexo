@@ -12,6 +12,7 @@ builder.Services.AddNexoRedis(builder.Configuration);
 builder.Services.AddNexoWebSocketProtocol(builder.Configuration);
 builder.Services.AddNexoWebSocketConnections(builder.Configuration);
 builder.Services.AddNexoRooms(builder.Configuration);
+builder.Services.AddNexoHeartbeat(builder.Configuration);
 
 var app = builder.Build();
 

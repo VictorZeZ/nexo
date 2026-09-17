@@ -1,4 +1,5 @@
-﻿using nexo.Middleware;
+﻿using nexo.BackgroundServices;
+using nexo.Middleware;
 using nexo.Options;
 using nexo.Rooms;
 using nexo.WebSockets.Handlers;
@@ -157,6 +158,21 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RoomConnectionRegistry>();
         services.AddSingleton<ChatHistoryStore>();
         services.AddSingleton<RoomMessageHandler>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers application-level connection health monitoring: a background sweep that
+    /// heartbeats live connections and closes any that have gone silent for too long.
+    /// </summary>
+    public static IServiceCollection AddNexoHeartbeat(this IServiceCollection services, IConfiguration configuration)
+    {
+        var heartbeatSettings = configuration.GetSection(HeartbeatSettings.SectionName).Get<HeartbeatSettings>()
+            ?? new HeartbeatSettings();
+
+        services.AddSingleton(heartbeatSettings);
+        services.AddHostedService<StaleConnectionSweepService>();
 
         return services;
     }

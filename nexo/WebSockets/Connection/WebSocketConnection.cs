@@ -1,6 +1,7 @@
 ﻿using nexo.Options;
 using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
+using nexo.WebSockets.Protocol.Messages;
 using System.Buffers;
 using System.Net.WebSockets;
 using System.Threading.Channels;
@@ -35,6 +36,19 @@ public sealed class WebSocketConnection : IAsyncDisposable
     /// never used for authorization. Required before a room can be created or joined.
     /// </summary>
     public string? DisplayName { get; set; }
+
+    /// <summary>UTC time of the last message received from the client, of any kind. Used to detect a stale connection.</summary>
+    public DateTimeOffset LastActivityAtUtc { get; private set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Sends a heartbeat message. Failure to enqueue (queue full) is handled the same as any other send.</summary>
+    public void SendHeartbeat() =>
+        TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.Heartbeat, new HeartbeatPayload
+        {
+            SentAtUtc = DateTimeOffset.UtcNow
+        }));
+
+    /// <summary>Closes this connection because it has gone silent for too long.</summary>
+    public void CloseAsStale() => _connectionCts.Cancel();
 
     /// <summary>
     /// Optional cleanup invoked once the connection has fully stopped. Used by higher layers
@@ -178,6 +192,8 @@ public sealed class WebSocketConnection : IAsyncDisposable
 
     private async Task HandleParsedMessageAsync(ProtocolParseResult parseResult, CancellationToken cancellationToken)
     {
+        LastActivityAtUtc = DateTimeOffset.UtcNow;
+
         if (parseResult.IsSuccess)
         {
             try

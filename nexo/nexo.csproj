@@ -9,7 +9,6 @@
   <ItemGroup>
     <Folder Include="Controllers\" />
     <Folder Include="Models\" />
-    <Folder Include="BackgroundServices\" />
     <Folder Include="Validation\" />
     <Folder Include="Services\" />
     <Folder Include="Signaling\" />

@@ -19,6 +19,10 @@ public sealed class RoomConnectionRegistry
         connections[connection.ConnectionId] = connection;
     }
 
+    /// <summary>All currently registered connections across every room, for the stale-connection sweep.</summary>
+    public IReadOnlyCollection<WebSocketConnection> GetAllConnections() =>
+        _roomConnections.Values.SelectMany(connections => connections.Values).ToArray();
+
     public void Unregister(string roomId, WebSocketConnection connection)
     {
         if (!_roomConnections.TryGetValue(roomId, out var connections))

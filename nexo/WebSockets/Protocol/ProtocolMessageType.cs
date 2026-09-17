@@ -29,4 +29,7 @@ public enum ProtocolMessageType
 
     // Protocol-level (server -> client)
     ProtocolError = 900,
+
+    // Connection health (server -> client)
+    Heartbeat = 40,
 }
