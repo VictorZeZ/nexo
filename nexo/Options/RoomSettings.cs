@@ -23,4 +23,11 @@ public sealed class RoomSettings
     /// trimmed once this limit is exceeded, so history storage can never grow unbounded.
     /// </summary>
     public int MaxHistoryMessages { get; init; } = 200;
+
+    /// <summary>
+    /// How long a participant's seat is held after an unexpected disconnect, as long as at least
+    /// one other participant is still connected. If nobody else remains connected, removal (and
+    /// room deletion, if now empty) happens immediately instead of waiting out this period.
+    /// </summary>
+    public int ReconnectGracePeriodSeconds { get; init; } = 1800;
 }

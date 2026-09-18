@@ -23,10 +23,12 @@ public sealed class WebSocketConnection : IAsyncDisposable
     public Guid ConnectionId { get; } = Guid.NewGuid();
 
     /// <summary>
-    /// The room-scoped identity used for membership, ownership, and relay attribution. Currently
-    /// just the connection's own ID, since no permanent user-identity system exists yet.
+    /// The room-scoped identity used for membership, ownership, and relay attribution. Defaults
+    /// to this connection's own ID, but is overwritten when a client successfully resumes a
+    /// previous session via a valid reconnect token, restoring their original participant
+    /// identity onto this new physical connection (see RoomMessageHandler).
     /// </summary>
-    public string ParticipantId => ConnectionId.ToString();
+    public string ParticipantId { get; set; }
 
     /// <summary>The room this connection currently belongs to, if any. Owned by the handler layer.</summary>
     public string? CurrentRoomId { get; set; }
@@ -78,6 +80,7 @@ public sealed class WebSocketConnection : IAsyncDisposable
         _roomMessageHandler = roomMessageHandler;
         _settings = settings;
         _logger = logger;
+        ParticipantId = ConnectionId.ToString();
 
         _receiveBuffer = ArrayPool<byte>.Shared.Rent(settings.MaxMessageSizeBytes);
 

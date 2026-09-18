@@ -23,14 +23,15 @@ public enum ProtocolMessageType
     // Participant state (client -> server, relayed to others)
     ParticipantSpeakingStateChanged = 20,
 
-    // Identity (client -> server, and confirmation server -> client)
+    // Identity and session resumption (client -> server, confirmations server -> client)
     SetDisplayName = 30,
     IdentityConfirmed = 31,
+    ResumeSession = 32,
 
     // Protocol-level (server -> client)
     ProtocolError = 900,
 
-    // Connection health (server -> client)
+    // Connection health (Heartbeat server -> client, HeartbeatAck client -> server)
     Heartbeat = 40,
     HeartbeatAck = 41,
 }

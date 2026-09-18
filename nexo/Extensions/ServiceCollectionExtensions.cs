@@ -145,8 +145,8 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registers room management: server-side room state, membership, capacity, private-room
-    /// password verification, chat history storage, live connection tracking, and the message
-    /// handler that ties rooms to the WebSocket layer.
+    /// password verification, chat history storage, live connection tracking, reconnect grace
+    /// tracking, and the message handler that ties rooms to the WebSocket layer.
     /// </summary>
     public static IServiceCollection AddNexoRooms(this IServiceCollection services, IConfiguration configuration)
     {
@@ -157,6 +157,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RoomManager>();
         services.AddSingleton<RoomConnectionRegistry>();
         services.AddSingleton<ChatHistoryStore>();
+        services.AddSingleton<PendingRoomRemovalTracker>();
         services.AddSingleton<RoomMessageHandler>();
 
         return services;

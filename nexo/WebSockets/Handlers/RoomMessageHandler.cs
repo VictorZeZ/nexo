@@ -1,4 +1,5 @@
-﻿using nexo.Rooms;
+﻿using nexo.Options;
+using nexo.Rooms;
 using nexo.Rooms.Models;
 using nexo.WebSockets.Connection;
 using nexo.WebSockets.Protocol;
@@ -16,6 +17,8 @@ public sealed class RoomMessageHandler(
     RoomManager roomManager,
     RoomConnectionRegistry connectionRegistry,
     ChatHistoryStore chatHistoryStore,
+    PendingRoomRemovalTracker pendingRemovalTracker,
+    RoomSettings roomSettings,
     ILogger<RoomMessageHandler> logger)
 {
     public async Task HandleAsync(WebSocketConnection connection, ProtocolMessageType messageType, object payload, CancellationToken cancellationToken)
@@ -24,6 +27,10 @@ public sealed class RoomMessageHandler(
         {
             case ProtocolMessageType.SetDisplayName:
                 HandleSetDisplayName(connection, (SetDisplayNamePayload)payload);
+                break;
+
+            case ProtocolMessageType.ResumeSession:
+                await HandleResumeSessionAsync(connection, (ResumeSessionPayload)payload, cancellationToken);
                 break;
 
             case ProtocolMessageType.CreateRoom:
@@ -59,17 +66,34 @@ public sealed class RoomMessageHandler(
         }
     }
 
-    /// <summary>Releases room membership and broadcast registration when a connection closes.</summary>
-    public async Task HandleDisconnectedAsync(WebSocketConnection connection)
+    /// <summary>
+    /// Handles an unexpected connection drop. If another live connection is still in the room,
+    /// the participant's seat is held for a grace period so a reconnect can resume it. If nobody
+    /// else is connected, there is nothing to preserve for — remove and let the room close now.
+    /// </summary>
+    public Task HandleDisconnectedAsync(WebSocketConnection connection)
     {
         var roomId = connection.CurrentRoomId;
         if (roomId is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         connectionRegistry.Unregister(roomId, connection);
-        await roomManager.LeaveRoomAsync(roomId, connection.ParticipantId, CancellationToken.None);
+
+        var participantId = connection.ParticipantId;
+
+        if (connectionRegistry.GetConnections(roomId).Count == 0)
+        {
+            return roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None);
+        }
+
+        pendingRemovalTracker.ScheduleRemoval(
+            participantId,
+            TimeSpan.FromSeconds(roomSettings.ReconnectGracePeriodSeconds),
+            () => roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None));
+
+        return Task.CompletedTask;
     }
 
     private void HandleSetDisplayName(WebSocketConnection connection, SetDisplayNamePayload payload)
@@ -82,6 +106,40 @@ public sealed class RoomMessageHandler(
         {
             DisplayName = connection.DisplayName
         }));
+    }
+
+    private async Task HandleResumeSessionAsync(WebSocketConnection connection, ResumeSessionPayload payload, CancellationToken cancellationToken)
+    {
+        if (connection.CurrentRoomId is not null)
+        {
+            SendError(connection, ProtocolErrorCode.AlreadyInRoom, "You must leave your current room before resuming another session.");
+            return;
+        }
+
+        var session = await roomManager.TryResumeSessionAsync(payload.ReconnectToken, cancellationToken);
+        if (session is null)
+        {
+            SendError(connection, ProtocolErrorCode.SessionExpired, "This session is no longer valid. Set a display name and join or create a room instead.");
+            return;
+        }
+
+        var joinResult = await roomManager.JoinRoomAsync(session.RoomId, session.ParticipantId, password: null, cancellationToken);
+        if (!joinResult.IsSuccess)
+        {
+            SendError(connection, ProtocolErrorCode.SessionExpired, "This session is no longer valid. Set a display name and join or create a room instead.");
+            return;
+        }
+
+        pendingRemovalTracker.CancelPendingRemoval(session.ParticipantId);
+
+        connection.ParticipantId = session.ParticipantId;
+        connection.DisplayName = session.DisplayName;
+
+        logger.LogInformation(
+            "Connection {ConnectionId} resumed session for participant {ParticipantId} in room {RoomId}.",
+            connection.ConnectionId, session.ParticipantId, session.RoomId);
+
+        await CompleteJoinAsync(connection, session.RoomId, joinResult.RoomName!, joinResult.Visibility!.Value, cancellationToken);
     }
 
     private async Task HandleCreateRoomAsync(WebSocketConnection connection, CreateRoomPayload payload, CancellationToken cancellationToken)
@@ -162,11 +220,14 @@ public sealed class RoomMessageHandler(
         await CompleteJoinAsync(connection, payload.RoomId, result.RoomName!, result.Visibility!.Value, cancellationToken);
     }
 
-    /// <summary>Shared tail for both a fresh join and a create-then-auto-join: register, confirm, deliver history.</summary>
+    /// <summary>Shared tail for a fresh join, a create-then-auto-join, or a resumed session: register, issue a
+    /// reconnect token, confirm, deliver history.</summary>
     private async Task CompleteJoinAsync(WebSocketConnection connection, string roomId, string roomName, RoomVisibility visibility, CancellationToken cancellationToken)
     {
         connection.CurrentRoomId = roomId;
         connectionRegistry.Register(roomId, connection);
+
+        var reconnectToken = await roomManager.CreateSessionAsync(roomId, connection.ParticipantId, connection.DisplayName!, cancellationToken);
 
         logger.LogInformation("Connection {ConnectionId} joined room {RoomId}.", connection.ConnectionId, roomId);
 
@@ -175,7 +236,8 @@ public sealed class RoomMessageHandler(
             RoomId = roomId,
             RoomName = roomName,
             ParticipantId = connection.ParticipantId,
-            Visibility = visibility
+            Visibility = visibility,
+            ReconnectToken = reconnectToken
         }));
 
         var history = await chatHistoryStore.GetHistoryAsync(roomId, cancellationToken);

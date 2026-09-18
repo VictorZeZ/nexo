@@ -7,9 +7,10 @@ using System.Text.Json;
 namespace nexo.Rooms;
 
 /// <summary>
-/// Owns server-side room state in Redis: creation, membership, capacity, and private-room
-/// password verification. Membership here is connection-scoped — no permanent user identity
-/// system exists yet, so a participant ID is only as durable as the connection that owns it.
+/// Owns server-side room state in Redis: creation, membership, capacity, private-room
+/// password verification, and reconnect sessions. Membership is connection-scoped in the sense
+/// that ParticipantId has no meaning outside a room, but a participant identity can now persist
+/// across a reconnect when a valid session token is presented (see RoomMessageHandler).
 /// </summary>
 public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings settings, ILogger<RoomManager> logger)
 {
@@ -128,7 +129,11 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
             room = JsonSerializer.Deserialize<RoomRecord>((string)existing!)
                 ?? throw new InvalidOperationException("Stored room record deserialized to null.");
 
-            if (room.Visibility == RoomVisibility.Private &&
+            var isAlreadyMember = await database.SetContainsAsync(participantsKey, participantId);
+
+            // An already-verified member (e.g. resuming a session) never needs to re-supply a
+            // private room's password; the session token itself is the credential at that point.
+            if (!isAlreadyMember && room.Visibility == RoomVisibility.Private &&
                 (string.IsNullOrEmpty(password) || room.PasswordHash is null || !RoomPasswordHasher.Verify(password, room.PasswordHash)))
             {
                 return RoomJoinResult.Failed(RoomJoinOutcome.InvalidPassword);
@@ -179,6 +184,52 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
         {
             logger.LogError(ex, "Redis unavailable while removing participant from room {RoomId}.", roomId);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Issues a fresh, unguessable reconnect token for a participant's current room session.
+    /// A new token replaces the need for any previous one (rotate-on-issue).
+    /// </summary>
+    public async Task<string> CreateSessionAsync(string roomId, string participantId, string displayName, CancellationToken cancellationToken)
+    {
+        var token = SessionTokenGenerator.Generate();
+
+        try
+        {
+            var database = redis.GetDatabase();
+            var session = new RoomSession(roomId, participantId, displayName);
+            var timeToLive = TimeSpan.FromMinutes(settings.TimeToLiveMinutes);
+
+            await database.StringSetAsync(RedisKeys.Session(token), JsonSerializer.Serialize(session), timeToLive);
+        }
+        catch (RedisConnectionException ex)
+        {
+            logger.LogError(ex, "Redis unavailable while creating a reconnect session for room {RoomId}.", roomId);
+            // Non-fatal: the client just won't be able to resume if Redis is briefly down; they
+            // can still rejoin normally with SetDisplayName + JoinRoom.
+        }
+
+        return token;
+    }
+
+    /// <summary>
+    /// Resolves and consumes a reconnect token in one step (a token can only ever be used once;
+    /// a fresh one is always issued afterward via <see cref="CreateSessionAsync"/>).
+    /// </summary>
+    public async Task<RoomSession?> TryResumeSessionAsync(string reconnectToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var database = redis.GetDatabase();
+            var raw = await database.StringGetDeleteAsync(RedisKeys.Session(reconnectToken));
+
+            return raw.IsNullOrEmpty ? null : JsonSerializer.Deserialize<RoomSession>((string)raw!);
+        }
+        catch (RedisConnectionException ex)
+        {
+            logger.LogError(ex, "Redis unavailable while resolving a reconnect session.");
+            return null;
         }
     }
 }

@@ -16,4 +16,5 @@ public sealed class ProtocolLimitsSettings
     public int MaxCiphertextLength { get; init; } = 8_000;
     public int MaxNonceLength { get; init; } = 64;
     public int MaxParticipantIdLength { get; init; } = 64;
+    public int MaxReconnectTokenLength { get; init; } = 128;
 }

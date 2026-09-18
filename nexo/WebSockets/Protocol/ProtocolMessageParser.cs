@@ -44,13 +44,14 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
             return envelope.Type switch
             {
                 ProtocolMessageType.SetDisplayName => ParsePayload<SetDisplayNamePayload>(envelope, ValidateSetDisplayName),
+                ProtocolMessageType.ResumeSession => ParsePayload<ResumeSessionPayload>(envelope, ValidateResumeSession),
                 ProtocolMessageType.CreateRoom => ParsePayload<CreateRoomPayload>(envelope, ValidateCreateRoom),
                 ProtocolMessageType.JoinRoom => ParsePayload<JoinRoomPayload>(envelope, ValidateJoinRoom),
                 ProtocolMessageType.LeaveRoom => ParsePayload<LeaveRoomPayload>(envelope, ValidateLeaveRoom),
                 ProtocolMessageType.ChatMessage => ParsePayload<ChatMessagePayload>(envelope, ValidateChatMessage),
-                ProtocolMessageType.HeartbeatAck => ParsePayload<HeartbeatAckPayload>(envelope, _ => null),
                 ProtocolMessageType.ParticipantSpeakingStateChanged =>
                     ParsePayload<ParticipantSpeakingStatePayload>(envelope, ValidateSpeakingState),
+                ProtocolMessageType.HeartbeatAck => ParsePayload<HeartbeatAckPayload>(envelope, _ => null),
                 _ => ProtocolParseResult.Failure(
                     ProtocolErrorCode.UnknownMessageType,
                     $"Message type '{envelope.Type}' is not recognized or cannot be sent by a client.")
@@ -80,6 +81,11 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
     private string? ValidateSetDisplayName(SetDisplayNamePayload payload) =>
         string.IsNullOrWhiteSpace(payload.DisplayName) || payload.DisplayName.Length > limits.MaxDisplayNameLength
             ? "DisplayName is required and must not exceed the maximum allowed length."
+            : null;
+
+    private string? ValidateResumeSession(ResumeSessionPayload payload) =>
+        string.IsNullOrWhiteSpace(payload.ReconnectToken) || payload.ReconnectToken.Length > limits.MaxReconnectTokenLength
+            ? "ReconnectToken is required and must not exceed the maximum allowed length."
             : null;
 
     private string? ValidateCreateRoom(CreateRoomPayload payload)

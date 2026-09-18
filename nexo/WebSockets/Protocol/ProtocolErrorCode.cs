@@ -17,4 +17,5 @@ public enum ProtocolErrorCode
     AlreadyInRoom = 9,
     RoomNotFound = 10,
     IdentityRequired = 11,
+    SessionExpired = 12,
 }
