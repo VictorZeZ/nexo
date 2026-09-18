@@ -48,6 +48,7 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
                 ProtocolMessageType.JoinRoom => ParsePayload<JoinRoomPayload>(envelope, ValidateJoinRoom),
                 ProtocolMessageType.LeaveRoom => ParsePayload<LeaveRoomPayload>(envelope, ValidateLeaveRoom),
                 ProtocolMessageType.ChatMessage => ParsePayload<ChatMessagePayload>(envelope, ValidateChatMessage),
+                ProtocolMessageType.HeartbeatAck => ParsePayload<HeartbeatAckPayload>(envelope, _ => null),
                 ProtocolMessageType.ParticipantSpeakingStateChanged =>
                     ParsePayload<ParticipantSpeakingStatePayload>(envelope, ValidateSpeakingState),
                 _ => ProtocolParseResult.Failure(

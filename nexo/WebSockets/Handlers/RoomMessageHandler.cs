@@ -46,6 +46,11 @@ public sealed class RoomMessageHandler(
                 HandleSpeakingStateChanged(connection, (ParticipantSpeakingStatePayload)payload);
                 break;
 
+            case ProtocolMessageType.HeartbeatAck:
+                // No action needed — any successfully parsed message already resets
+                // LastActivityAtUtc in WebSocketConnection before dispatch reaches here.
+                break;
+
             default:
                 // The parser only ever produces client-permitted message types, so this should be
                 // unreachable; logged defensively rather than silently ignored.

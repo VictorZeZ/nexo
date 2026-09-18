@@ -32,4 +32,5 @@ public enum ProtocolMessageType
 
     // Connection health (server -> client)
     Heartbeat = 40,
+    HeartbeatAck = 41,
 }
