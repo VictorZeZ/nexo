@@ -28,4 +28,13 @@ public sealed class WebSocketConnectionSettings
     /// the connection alive. This is distinct from any future application-level heartbeat.
     /// </summary>
     public int KeepAliveIntervalSeconds { get; init; } = 30;
+
+    /// <summary>Maximum number of concurrent WebSocket connections a single client IP address may hold open.</summary>
+    public int MaxConcurrentConnectionsPerIp { get; init; } = 20;
+
+    /// <summary>Token-bucket burst capacity for inbound application messages on a single connection.</summary>
+    public int MessageBurstCapacity { get; init; } = 60;
+
+    /// <summary>Sustained inbound messages per second a connection is allowed once its burst capacity is used up.</summary>
+    public int MessagesPerSecond { get; init; } = 30;
 }

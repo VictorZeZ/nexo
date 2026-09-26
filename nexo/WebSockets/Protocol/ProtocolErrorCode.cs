@@ -18,4 +18,5 @@ public enum ProtocolErrorCode
     RoomNotFound = 10,
     IdentityRequired = 11,
     SessionExpired = 12,
+    RoomCreationLimitExceeded = 14,
 }

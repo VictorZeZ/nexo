@@ -150,6 +150,12 @@ public sealed class RoomMessageHandler(
             return;
         }
 
+        if (!connection.TryRecordRoomCreated(roomSettings.MaxRoomsCreatedPerConnection))
+        {
+            SendError(connection, ProtocolErrorCode.RoomCreationLimitExceeded, "You have reached the maximum number of rooms you can create on this connection.");
+            return;
+        }
+
         if (connection.CurrentRoomId is not null)
         {
             SendError(connection, ProtocolErrorCode.AlreadyInRoom, "You must leave your current room before creating another.");

@@ -30,4 +30,10 @@ public sealed class RoomSettings
     /// room deletion, if now empty) happens immediately instead of waiting out this period.
     /// </summary>
     public int ReconnectGracePeriodSeconds { get; init; } = 1800;
+
+    /// <summary>
+    /// Maximum number of rooms a single connection may create. A coarse, cheap defense against
+    /// mass room creation; combined with per-IP connection and message-rate limits.
+    /// </summary>
+    public int MaxRoomsCreatedPerConnection { get; init; } = 10;
 }

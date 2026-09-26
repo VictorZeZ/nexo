@@ -5,6 +5,7 @@ using nexo.WebSockets.Protocol.Messages;
 using System.Buffers;
 using System.Net.WebSockets;
 using System.Threading.Channels;
+using System.Threading.RateLimiting;
 
 namespace nexo.WebSockets.Connection;
 
@@ -12,7 +13,8 @@ namespace nexo.WebSockets.Connection;
 /// Owns the full lifecycle of a single WebSocket connection: receiving and reassembling
 /// application messages, parsing them via <see cref="ProtocolMessageParser"/>, dispatching valid
 /// messages to <see cref="RoomMessageHandler"/>, and serializing all outbound sends through a
-/// single dedicated queue so concurrent sends never race on the same socket.
+/// single dedicated queue so concurrent sends never race on the same socket. Inbound messages are
+/// rate-limited per connection to prevent a single client from flooding the server.
 /// </summary>
 public sealed class WebSocketConnection : IAsyncDisposable
 {
@@ -52,6 +54,9 @@ public sealed class WebSocketConnection : IAsyncDisposable
     /// <summary>Closes this connection because it has gone silent for too long.</summary>
     public void CloseAsStale() => _connectionCts.Cancel();
 
+    /// <summary>Attempts to record a room creation for this connection, enforcing a per-connection cap.</summary>
+    public bool TryRecordRoomCreated(int maxAllowed) => Interlocked.Increment(ref _roomsCreatedCount) <= maxAllowed;
+
     /// <summary>
     /// Optional cleanup invoked once the connection has fully stopped. Used by higher layers
     /// (e.g. room membership) to release connection-specific state without coupling this class
@@ -67,6 +72,8 @@ public sealed class WebSocketConnection : IAsyncDisposable
     private readonly Channel<byte[]> _outbox;
     private readonly byte[] _receiveBuffer;
     private readonly CancellationTokenSource _connectionCts = new();
+    private readonly TokenBucketRateLimiter _messageRateLimiter;
+    private int _roomsCreatedCount;
 
     public WebSocketConnection(
         WebSocket socket,
@@ -89,6 +96,16 @@ public sealed class WebSocketConnection : IAsyncDisposable
             SingleReader = true,
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
+        });
+
+        _messageRateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = settings.MessageBurstCapacity,
+            TokensPerPeriod = settings.MessagesPerSecond,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+            AutoReplenishment = true,
+            QueueLimit = 0,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
         });
     }
 
@@ -177,6 +194,14 @@ public sealed class WebSocketConnection : IAsyncDisposable
                 }
                 while (!result.EndOfMessage);
 
+                using var rateLimitLease = _messageRateLimiter.AttemptAcquire(1);
+                if (!rateLimitLease.IsAcquired)
+                {
+                    _logger.LogWarning("Connection {ConnectionId} exceeded the inbound message rate limit; closing.", ConnectionId);
+                    await _socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Message rate limit exceeded.", CancellationToken.None);
+                    return;
+                }
+
                 // Text and binary frames are treated identically: the protocol is encoding-agnostic
                 // (see ProtocolMessageParser), so the wire encoding can change later without touching this loop.
                 var parseResult = _parser.Parse(new ReadOnlySpan<byte>(_receiveBuffer, 0, totalBytesReceived));
@@ -258,10 +283,10 @@ public sealed class WebSocketConnection : IAsyncDisposable
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         ArrayPool<byte>.Shared.Return(_receiveBuffer);
         _connectionCts.Dispose();
-        return ValueTask.CompletedTask;
+        await _messageRateLimiter.DisposeAsync();
     }
 }

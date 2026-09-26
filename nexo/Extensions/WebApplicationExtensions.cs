@@ -15,6 +15,11 @@ public static class WebApplicationExtensions
         // Must run first so it can catch exceptions from everything downstream.
         app.UseExceptionHandler();
 
+        if (!app.Environment.IsDevelopment())
+        {
+            app.UseHsts();
+        }
+
         app.UseHttpsRedirection();
 
         var webSocketSettings = app.Services.GetRequiredService<WebSocketConnectionSettings>();
@@ -33,7 +38,9 @@ public static class WebApplicationExtensions
     }
 
     /// <summary>
-    /// Maps the WebSocket upgrade endpoint. Each accepted connection is handed off to a
+    /// Maps the WebSocket upgrade endpoint. Validates the Origin header (when present) against
+    /// the configured CORS allow-list and enforces a per-IP concurrent connection cap before
+    /// accepting the socket. Each accepted connection is handed off to a
     /// <see cref="WebSocketConnection"/>, wired to <see cref="RoomMessageHandler"/> for both
     /// message dispatch and cleanup on disconnect.
     /// </summary>
@@ -44,6 +51,8 @@ public static class WebApplicationExtensions
             ProtocolMessageParser parser,
             RoomMessageHandler roomMessageHandler,
             WebSocketConnectionSettings settings,
+            CorsSettings corsSettings,
+            IpConnectionLimiter connectionLimiter,
             ILoggerFactory loggerFactory) =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
@@ -52,18 +61,43 @@ public static class WebApplicationExtensions
                 return;
             }
 
-            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            // A browser-sent Origin header must match the allow-list (defends against cross-site
+            // WebSocket hijacking, since browsers do not apply same-origin policy to WebSockets).
+            // A missing Origin header (native apps, server-to-server, tools like Postman) is allowed.
+            var origin = context.Request.Headers.Origin.ToString();
+            if (!string.IsNullOrEmpty(origin) &&
+                !corsSettings.AllowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
 
-            await using var connection = new WebSocketConnection(
-                socket,
-                parser,
-                roomMessageHandler,
-                settings,
-                loggerFactory.CreateLogger<WebSocketConnection>());
+            var remoteIp = context.Connection.RemoteIpAddress;
+            if (!connectionLimiter.TryAcquire(remoteIp, settings.MaxConcurrentConnectionsPerIp))
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                return;
+            }
 
-            connection.OnClosedAsync = roomMessageHandler.HandleDisconnectedAsync;
+            try
+            {
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
 
-            await connection.RunAsync(context.RequestAborted);
+                await using var connection = new WebSocketConnection(
+                    socket,
+                    parser,
+                    roomMessageHandler,
+                    settings,
+                    loggerFactory.CreateLogger<WebSocketConnection>());
+
+                connection.OnClosedAsync = roomMessageHandler.HandleDisconnectedAsync;
+
+                await connection.RunAsync(context.RequestAborted);
+            }
+            finally
+            {
+                connectionLimiter.Release(remoteIp);
+            }
         });
 
         return app;

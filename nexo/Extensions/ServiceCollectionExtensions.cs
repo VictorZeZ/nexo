@@ -2,6 +2,7 @@
 using nexo.Middleware;
 using nexo.Options;
 using nexo.Rooms;
+using nexo.WebSockets.Connection;
 using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
 using StackExchange.Redis;
@@ -30,11 +31,15 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers a CORS policy built from explicit, configured allowed origins.
     /// If no origins are configured, cross-origin requests are denied rather than falling back to a wildcard.
+    /// Also registers CorsSettings itself so the WebSocket endpoint can reuse the same allow-list
+    /// for Origin header validation on the handshake.
     /// </summary>
     public static IServiceCollection AddNexoCors(this IServiceCollection services, IConfiguration configuration)
     {
         var corsSettings = configuration.GetSection(CorsSettings.SectionName).Get<CorsSettings>()
             ?? new CorsSettings();
+
+        services.AddSingleton(corsSettings);
 
         services.AddCors(options =>
         {
@@ -131,7 +136,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers structural limits and transport settings for the WebSocket connection layer.
+    /// Registers structural limits and transport settings for the WebSocket connection layer,
+    /// plus the per-IP concurrent connection limiter.
     /// </summary>
     public static IServiceCollection AddNexoWebSocketConnections(this IServiceCollection services, IConfiguration configuration)
     {
@@ -139,6 +145,7 @@ public static class ServiceCollectionExtensions
             ?? new WebSocketConnectionSettings();
 
         services.AddSingleton(settings);
+        services.AddSingleton<IpConnectionLimiter>();
 
         return services;
     }
