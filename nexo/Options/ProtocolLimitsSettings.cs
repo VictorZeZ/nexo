@@ -17,4 +17,7 @@ public sealed class ProtocolLimitsSettings
     public int MaxNonceLength { get; init; } = 64;
     public int MaxParticipantIdLength { get; init; } = 64;
     public int MaxReconnectTokenLength { get; init; } = 128;
+    public int MaxSdpLength { get; init; } = 10_000;
+    public int MaxIceCandidateLength { get; init; } = 2_000;
+    public int MaxSdpMidLength { get; init; } = 32;
 }

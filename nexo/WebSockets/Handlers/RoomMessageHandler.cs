@@ -1,6 +1,7 @@
 ﻿using nexo.Options;
 using nexo.Rooms;
 using nexo.Rooms.Models;
+using nexo.Signaling;
 using nexo.WebSockets.Connection;
 using nexo.WebSockets.Protocol;
 using nexo.WebSockets.Protocol.Messages;
@@ -18,6 +19,7 @@ public sealed class RoomMessageHandler(
     RoomConnectionRegistry connectionRegistry,
     ChatHistoryStore chatHistoryStore,
     PendingRoomRemovalTracker pendingRemovalTracker,
+    WebRtcSignalingHandler webRtcSignalingHandler,
     RoomSettings roomSettings,
     ILogger<RoomMessageHandler> logger)
 {
@@ -58,6 +60,18 @@ public sealed class RoomMessageHandler(
                 // LastActivityAtUtc in WebSocketConnection before dispatch reaches here.
                 break;
 
+            case ProtocolMessageType.WebRtcOffer:
+                webRtcSignalingHandler.HandleOffer(connection, (WebRtcOfferPayload)payload);
+                break;
+
+            case ProtocolMessageType.WebRtcAnswer:
+                webRtcSignalingHandler.HandleAnswer(connection, (WebRtcAnswerPayload)payload);
+                break;
+
+            case ProtocolMessageType.WebRtcIceCandidate:
+                webRtcSignalingHandler.HandleIceCandidate(connection, (WebRtcIceCandidatePayload)payload);
+                break;
+
             default:
                 // The parser only ever produces client-permitted message types, so this should be
                 // unreachable; logged defensively rather than silently ignored.
@@ -91,7 +105,11 @@ public sealed class RoomMessageHandler(
         pendingRemovalTracker.ScheduleRemoval(
             participantId,
             TimeSpan.FromSeconds(roomSettings.ReconnectGracePeriodSeconds),
-            () => roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None));
+            async () =>
+            {
+                await roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None);
+                BroadcastParticipantLeft(roomId, participantId);
+            });
 
         return Task.CompletedTask;
     }
@@ -266,6 +284,19 @@ public sealed class RoomMessageHandler(
         connection.CurrentRoomId = null;
 
         logger.LogInformation("Connection {ConnectionId} left room {RoomId}.", connection.ConnectionId, payload.RoomId);
+    }
+
+    private void BroadcastParticipantLeft(string roomId, string participantId)
+    {
+        var bytes = ProtocolEnvelopeWriter.Write(ProtocolMessageType.ParticipantLeft, new ParticipantLeftPayload
+        {
+            ParticipantId = participantId
+        });
+
+        foreach (var participantConnection in connectionRegistry.GetConnections(roomId))
+        {
+            participantConnection.TryEnqueueSend(bytes);
+        }
     }
 
     private async Task HandleChatMessageAsync(WebSocketConnection connection, ChatMessagePayload payload, CancellationToken cancellationToken)

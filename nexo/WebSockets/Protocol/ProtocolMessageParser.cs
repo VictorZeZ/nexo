@@ -52,9 +52,12 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
                 ProtocolMessageType.ParticipantSpeakingStateChanged =>
                     ParsePayload<ParticipantSpeakingStatePayload>(envelope, ValidateSpeakingState),
                 ProtocolMessageType.HeartbeatAck => ParsePayload<HeartbeatAckPayload>(envelope, _ => null),
+                ProtocolMessageType.WebRtcOffer => ParsePayload<WebRtcOfferPayload>(envelope, ValidateWebRtcOffer),
+                ProtocolMessageType.WebRtcAnswer => ParsePayload<WebRtcAnswerPayload>(envelope, ValidateWebRtcAnswer),
+                ProtocolMessageType.WebRtcIceCandidate => ParsePayload<WebRtcIceCandidatePayload>(envelope, ValidateWebRtcIceCandidate),
                 _ => ProtocolParseResult.Failure(
                     ProtocolErrorCode.UnknownMessageType,
-                    $"Message type '{envelope.Type}' is not recognized or cannot be sent by a client.")
+                    $"Message type '{envelope.Type}' is not recognized or cannot be sent by a client."),
             };
         }
         catch (JsonException)
@@ -158,4 +161,48 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
         string.IsNullOrWhiteSpace(payload.ParticipantId) || payload.ParticipantId.Length > limits.MaxParticipantIdLength
             ? "ParticipantId is required and must not exceed the maximum allowed length."
             : null;
+
+    private string? ValidateWebRtcOffer(WebRtcOfferPayload payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.ToParticipantId) || payload.ToParticipantId.Length > limits.MaxParticipantIdLength)
+        {
+            return "ToParticipantId is required and must not exceed the maximum allowed length.";
+        }
+
+        return string.IsNullOrEmpty(payload.Sdp) || payload.Sdp.Length > limits.MaxSdpLength
+            ? "Sdp is required and must not exceed the maximum allowed length."
+            : null;
+    }
+
+    private string? ValidateWebRtcAnswer(WebRtcAnswerPayload payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.ToParticipantId) || payload.ToParticipantId.Length > limits.MaxParticipantIdLength)
+        {
+            return "ToParticipantId is required and must not exceed the maximum allowed length.";
+        }
+
+        return string.IsNullOrEmpty(payload.Sdp) || payload.Sdp.Length > limits.MaxSdpLength
+            ? "Sdp is required and must not exceed the maximum allowed length."
+            : null;
+    }
+
+    private string? ValidateWebRtcIceCandidate(WebRtcIceCandidatePayload payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload.ToParticipantId) || payload.ToParticipantId.Length > limits.MaxParticipantIdLength)
+        {
+            return "ToParticipantId is required and must not exceed the maximum allowed length.";
+        }
+
+        if (string.IsNullOrEmpty(payload.Candidate) || payload.Candidate.Length > limits.MaxIceCandidateLength)
+        {
+            return "Candidate is required and must not exceed the maximum allowed length.";
+        }
+
+        if (payload.SdpMid is { Length: > 0 } sdpMid && sdpMid.Length > limits.MaxSdpMidLength)
+        {
+            return "SdpMid exceeds the maximum allowed length.";
+        }
+
+        return null;
+    }
 }

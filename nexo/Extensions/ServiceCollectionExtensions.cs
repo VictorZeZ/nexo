@@ -2,6 +2,7 @@
 using nexo.Middleware;
 using nexo.Options;
 using nexo.Rooms;
+using nexo.Signaling;
 using nexo.WebSockets.Connection;
 using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
@@ -181,6 +182,17 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(heartbeatSettings);
         services.AddHostedService<StaleConnectionSweepService>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers WebRTC signaling relay. Depends only on room connection tracking — knows
+    /// nothing about chat, Redis, or protocol parsing.
+    /// </summary>
+    public static IServiceCollection AddNexoSignaling(this IServiceCollection services)
+    {
+        services.AddSingleton<WebRtcSignalingHandler>();
 
         return services;
     }

@@ -20,18 +20,24 @@ public enum ProtocolMessageType
     MessageAck = 11,
     RoomHistory = 12,
 
-    // Participant state (client -> server, relayed to others)
+    // Participant state (client -> server unless noted, relayed/announced to others)
     ParticipantSpeakingStateChanged = 20,
+    ParticipantLeft = 21, // server -> client only
 
     // Identity and session resumption (client -> server, confirmations server -> client)
     SetDisplayName = 30,
     IdentityConfirmed = 31,
     ResumeSession = 32,
 
-    // Protocol-level (server -> client)
-    ProtocolError = 900,
-
     // Connection health (Heartbeat server -> client, HeartbeatAck client -> server)
     Heartbeat = 40,
     HeartbeatAck = 41,
+
+    // WebRTC signaling (client -> server, relayed to a specific peer in the same room)
+    WebRtcOffer = 50,
+    WebRtcAnswer = 51,
+    WebRtcIceCandidate = 52,
+
+    // Protocol-level (server -> client)
+    ProtocolError = 900,
 }

@@ -42,4 +42,10 @@ public sealed class RoomConnectionRegistry
         _roomConnections.TryGetValue(roomId, out var connections)
             ? connections.Values.ToArray()
             : [];
+
+    /// <summary>Finds a specific participant's live connection within a room, or null if they aren't connected to it.</summary>
+    public WebSocketConnection? FindConnection(string roomId, string participantId) =>
+        _roomConnections.TryGetValue(roomId, out var connections)
+            ? connections.Values.FirstOrDefault(c => c.ParticipantId == participantId)
+            : null;
 }
