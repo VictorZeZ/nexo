@@ -40,6 +40,12 @@ public sealed class WebSocketConnection : IAsyncDisposable
     /// never used for authorization. Required before a room can be created or joined.
     /// </summary>
     public string? DisplayName { get; set; }
+    /// <summary>
+    /// The most recently issued reconnect token for this connection's current room session,
+    /// tracked so the server can invalidate it when the participant leaves or is removed.
+    /// A bearer credential: never logged.
+    /// </summary>
+    public string? ReconnectToken { get; set; }
 
     /// <summary>UTC time of the last message received from the client, of any kind. Used to detect a stale connection.</summary>
     public DateTimeOffset LastActivityAtUtc { get; private set; } = DateTimeOffset.UtcNow;
@@ -53,6 +59,16 @@ public sealed class WebSocketConnection : IAsyncDisposable
 
     /// <summary>Closes this connection because it has gone silent for too long.</summary>
     public void CloseAsStale() => _connectionCts.Cancel();
+    /// <summary>
+    /// Closes this connection because the same participant has resumed on a newer one. Detaches
+    /// it from its room first so its close handling never removes the participant's seat.
+    /// </summary>
+    public void CloseAsSuperseded()
+    {
+        CurrentRoomId = null;
+        ReconnectToken = null;
+        _connectionCts.Cancel();
+    }
 
     /// <summary>Attempts to record a room creation for this connection, enforcing a per-connection cap.</summary>
     public bool TryRecordRoomCreated(int maxAllowed) => Interlocked.Increment(ref _roomsCreatedCount) <= maxAllowed;

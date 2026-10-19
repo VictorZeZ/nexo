@@ -169,7 +169,11 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
         return RoomJoinResult.Joined(room.Visibility, room.RoomName);
     }
 
-    public async Task<bool> LeaveRoomAsync(string roomId, string participantId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Removes a participant from a room (deleting the room if it becomes empty) and invalidates
+    /// their reconnect token, so a participant who has left cannot resume into the room later.
+    /// </summary>
+    public async Task<bool> LeaveRoomAsync(string roomId, string participantId, string? reconnectToken, CancellationToken cancellationToken)
     {
         var database = redis.GetDatabase();
         var roomKey = RedisKeys.Room(roomId);
@@ -178,12 +182,34 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
         try
         {
             await database.ScriptEvaluateAsync(RemoveParticipantScript, [roomKey, participantsKey], [participantId]);
-            return true;
         }
         catch (RedisConnectionException ex)
         {
             logger.LogError(ex, "Redis unavailable while removing participant from room {RoomId}.", roomId);
             return false;
+        }
+
+        if (reconnectToken is not null)
+        {
+            await DeleteSessionAsync(reconnectToken, cancellationToken);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Invalidates a reconnect token. A failure is non-fatal: the token still expires on its own
+    /// when its TTL elapses.
+    /// </summary>
+    public async Task DeleteSessionAsync(string reconnectToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await redis.GetDatabase().KeyDeleteAsync(RedisKeys.Session(reconnectToken));
+        }
+        catch (RedisConnectionException ex)
+        {
+            logger.LogError(ex, "Redis unavailable while invalidating a reconnect session.");
         }
     }
 

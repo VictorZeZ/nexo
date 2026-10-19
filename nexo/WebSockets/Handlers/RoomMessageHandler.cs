@@ -96,10 +96,11 @@ public sealed class RoomMessageHandler(
         connectionRegistry.Unregister(roomId, connection);
 
         var participantId = connection.ParticipantId;
+        var reconnectToken = connection.ReconnectToken;
 
         if (connectionRegistry.GetConnections(roomId).Count == 0)
         {
-            return roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None);
+            return roomManager.LeaveRoomAsync(roomId, participantId, reconnectToken, CancellationToken.None);
         }
 
         pendingRemovalTracker.ScheduleRemoval(
@@ -107,7 +108,7 @@ public sealed class RoomMessageHandler(
             TimeSpan.FromSeconds(roomSettings.ReconnectGracePeriodSeconds),
             async () =>
             {
-                await roomManager.LeaveRoomAsync(roomId, participantId, CancellationToken.None);
+                await roomManager.LeaveRoomAsync(roomId, participantId, reconnectToken, CancellationToken.None);
                 BroadcastParticipantLeft(roomId, participantId);
             });
 
@@ -149,6 +150,17 @@ public sealed class RoomMessageHandler(
         }
 
         pendingRemovalTracker.CancelPendingRemoval(session.ParticipantId);
+
+        // The participant's previous connection may still be registered if its drop has not been
+        // detected yet (e.g. a half-open socket). Evict it so relayed messages and signaling can
+        // never reach the dead socket, and so its eventual close cannot schedule a removal for a
+        // participant who is live again.
+        var supersededConnection = connectionRegistry.FindConnection(session.RoomId, session.ParticipantId);
+        if (supersededConnection is not null)
+        {
+            connectionRegistry.Unregister(session.RoomId, supersededConnection);
+            supersededConnection.CloseAsSuperseded();
+        }
 
         connection.ParticipantId = session.ParticipantId;
         connection.DisplayName = session.DisplayName;
@@ -251,7 +263,15 @@ public sealed class RoomMessageHandler(
         connection.CurrentRoomId = roomId;
         connectionRegistry.Register(roomId, connection);
 
+        var previousReconnectToken = connection.ReconnectToken;
         var reconnectToken = await roomManager.CreateSessionAsync(roomId, connection.ParticipantId, connection.DisplayName!, cancellationToken);
+        connection.ReconnectToken = reconnectToken;
+
+        // Tokens rotate on every issue: once a client holds the new one, the old one must die.
+        if (previousReconnectToken is not null)
+        {
+            await roomManager.DeleteSessionAsync(previousReconnectToken, cancellationToken);
+        }
 
         logger.LogInformation("Connection {ConnectionId} joined room {RoomId}.", connection.ConnectionId, roomId);
 
@@ -279,9 +299,13 @@ public sealed class RoomMessageHandler(
             return;
         }
 
+        // Unregister first so the leaving participant does not receive their own ParticipantLeft.
         connectionRegistry.Unregister(payload.RoomId, connection);
-        await roomManager.LeaveRoomAsync(payload.RoomId, connection.ParticipantId, cancellationToken);
+        await roomManager.LeaveRoomAsync(payload.RoomId, connection.ParticipantId, connection.ReconnectToken, cancellationToken);
         connection.CurrentRoomId = null;
+        connection.ReconnectToken = null;
+
+        BroadcastParticipantLeft(payload.RoomId, connection.ParticipantId);
 
         logger.LogInformation("Connection {ConnectionId} left room {RoomId}.", connection.ConnectionId, payload.RoomId);
     }
