@@ -216,6 +216,12 @@ public sealed class WebSocketConnection : IAsyncDisposable
         {
             _logger.LogDebug(ex, "Connection {ConnectionId} closed abnormally during receive.", ConnectionId);
         }
+        catch (Exception ex)
+        {
+            // Last line of defense: an unexpected failure must end only this connection and still
+            // let RunAsync run the registered cleanup instead of faulting past it.
+            _logger.LogError(ex, "Unexpected failure in the receive loop of connection {ConnectionId}; closing.", ConnectionId);
+        }
     }
 
     private async Task HandleParsedMessageAsync(ProtocolParseResult parseResult, CancellationToken cancellationToken)
@@ -265,6 +271,11 @@ public sealed class WebSocketConnection : IAsyncDisposable
         catch (WebSocketException ex)
         {
             _logger.LogDebug(ex, "Connection {ConnectionId} closed abnormally during send.", ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected failure in the send loop of connection {ConnectionId}; closing.", ConnectionId);
+            _connectionCts.Cancel();
         }
     }
 

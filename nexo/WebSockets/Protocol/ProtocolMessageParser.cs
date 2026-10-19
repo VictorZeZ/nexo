@@ -71,6 +71,15 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
     private ProtocolParseResult ParsePayload<TPayload>(ProtocolEnvelope envelope, Func<TPayload, string?> validate)
         where TPayload : class
     {
+        // A missing "payload" field leaves the JsonElement in its default (Undefined) state, and
+        // deserializing that throws InvalidOperationException rather than JsonException.
+        if (envelope.Payload.ValueKind != JsonValueKind.Object)
+        {
+            return ProtocolParseResult.Failure(
+                ProtocolErrorCode.InvalidPayload,
+                $"The payload for message type '{envelope.Type}' must be a JSON object.");
+        }
+
         var payload = envelope.Payload.Deserialize<TPayload>(SerializerOptions)
             ?? throw new JsonException($"Payload deserialized to null for type {typeof(TPayload).Name}.");
 
