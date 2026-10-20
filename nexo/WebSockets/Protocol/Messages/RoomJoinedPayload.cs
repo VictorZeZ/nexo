@@ -17,4 +17,10 @@ public sealed record RoomJoinedPayload
     /// and discard any previous one — each token is single-use and is replaced every time.
     /// </summary>
     public required string ReconnectToken { get; init; }
+
+    /// <summary>
+    /// Every other participant currently connected to the room, excluding the recipient. The
+    /// joiner initiates WebRTC negotiation with each of them; existing members wait for its offer.
+    /// </summary>
+    public required IReadOnlyList<ParticipantInfo> Participants { get; init; }
 }

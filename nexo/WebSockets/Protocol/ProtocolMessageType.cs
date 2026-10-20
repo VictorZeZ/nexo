@@ -23,6 +23,7 @@ public enum ProtocolMessageType
     // Participant state (client -> server unless noted, relayed/announced to others)
     ParticipantSpeakingStateChanged = 20,
     ParticipantLeft = 21, // server -> client only
+    ParticipantJoined = 22, // server -> client only
 
     // Identity and session resumption (client -> server, confirmations server -> client)
     SetDisplayName = 30,

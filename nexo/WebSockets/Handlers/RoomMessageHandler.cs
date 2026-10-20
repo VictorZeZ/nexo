@@ -257,9 +257,13 @@ public sealed class RoomMessageHandler(
     }
 
     /// <summary>Shared tail for a fresh join, a create-then-auto-join, or a resumed session: register, issue a
-    /// reconnect token, confirm, deliver history.</summary>
+    /// reconnect token, confirm with the current roster, announce to existing members, deliver history.</summary>
     private async Task CompleteJoinAsync(WebSocketConnection connection, string roomId, string roomName, RoomVisibility visibility, CancellationToken cancellationToken)
     {
+        // A repeated JoinRoom for the room the connection is already in is idempotent and must not
+        // re-announce the participant, which would make peers renegotiate for nothing.
+        var isNewToRoom = connection.CurrentRoomId != roomId;
+
         connection.CurrentRoomId = roomId;
         connectionRegistry.Register(roomId, connection);
 
@@ -273,6 +277,11 @@ public sealed class RoomMessageHandler(
             await roomManager.DeleteSessionAsync(previousReconnectToken, cancellationToken);
         }
 
+        var roster = connectionRegistry.GetConnections(roomId)
+            .Where(other => other.ConnectionId != connection.ConnectionId)
+            .Select(ToParticipantInfo)
+            .ToList();
+
         logger.LogInformation("Connection {ConnectionId} joined room {RoomId}.", connection.ConnectionId, roomId);
 
         connection.TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.RoomJoined, new RoomJoinedPayload
@@ -281,8 +290,14 @@ public sealed class RoomMessageHandler(
             RoomName = roomName,
             ParticipantId = connection.ParticipantId,
             Visibility = visibility,
-            ReconnectToken = reconnectToken
+            ReconnectToken = reconnectToken,
+            Participants = roster
         }));
+
+        if (isNewToRoom)
+        {
+            BroadcastParticipantJoined(roomId, connection);
+        }
 
         var history = await chatHistoryStore.GetHistoryAsync(roomId, cancellationToken);
         connection.TryEnqueueSend(ProtocolEnvelopeWriter.Write(ProtocolMessageType.RoomHistory, new RoomHistoryPayload
@@ -290,6 +305,28 @@ public sealed class RoomMessageHandler(
             Messages = history
         }));
     }
+
+    private void BroadcastParticipantJoined(string roomId, WebSocketConnection joinedConnection)
+    {
+        var bytes = ProtocolEnvelopeWriter.Write(ProtocolMessageType.ParticipantJoined, ToParticipantInfo(joinedConnection));
+
+        foreach (var participantConnection in connectionRegistry.GetConnections(roomId))
+        {
+            if (participantConnection.ConnectionId == joinedConnection.ConnectionId)
+            {
+                continue;
+            }
+
+            participantConnection.TryEnqueueSend(bytes);
+        }
+    }
+
+    // DisplayName is guaranteed set: a connection cannot be registered in a room without an identity.
+    private static ParticipantInfo ToParticipantInfo(WebSocketConnection connection) => new()
+    {
+        ParticipantId = connection.ParticipantId,
+        DisplayName = connection.DisplayName!
+    };
 
     private async Task HandleLeaveRoomAsync(WebSocketConnection connection, LeaveRoomPayload payload, CancellationToken cancellationToken)
     {
