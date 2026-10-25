@@ -258,4 +258,46 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
             return null;
         }
     }
+
+    /// <summary>
+    /// Extends the Redis TTL of every room and reconnect session that still has a live connection,
+    /// in a single pipelined round trip. Without this, a room that stays active longer than
+    /// <see cref="RoomSettings.TimeToLiveMinutes"/> would silently lose its state underneath its
+    /// participants. A failure is non-fatal: the next sweep simply tries again.
+    /// </summary>
+    public async Task RefreshActiveStateAsync(
+        IReadOnlyCollection<string> roomIds,
+        IReadOnlyCollection<string> reconnectTokens,
+        CancellationToken cancellationToken)
+    {
+        if (roomIds.Count == 0 && reconnectTokens.Count == 0)
+        {
+            return;
+        }
+
+        var timeToLive = TimeSpan.FromMinutes(settings.TimeToLiveMinutes);
+        var batch = redis.GetDatabase().CreateBatch();
+        var pending = new List<Task>(roomIds.Count * 2 + reconnectTokens.Count);
+
+        foreach (var roomId in roomIds)
+        {
+            pending.Add(batch.KeyExpireAsync(RedisKeys.Room(roomId), timeToLive));
+            pending.Add(batch.KeyExpireAsync(RedisKeys.RoomParticipants(roomId), timeToLive));
+        }
+
+        foreach (var reconnectToken in reconnectTokens)
+        {
+            pending.Add(batch.KeyExpireAsync(RedisKeys.Session(reconnectToken), timeToLive));
+        }
+
+        try
+        {
+            batch.Execute();
+            await Task.WhenAll(pending).WaitAsync(cancellationToken);
+        }
+        catch (RedisException ex)
+        {
+            logger.LogWarning(ex, "Redis unavailable while refreshing the TTL of active rooms and sessions.");
+        }
+    }
 }

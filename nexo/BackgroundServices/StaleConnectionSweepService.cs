@@ -4,12 +4,15 @@ using nexo.Rooms;
 namespace nexo.BackgroundServices;
 
 /// <summary>
-/// Periodically sends a heartbeat to every live connection and closes any connection that has
-/// gone silent for too long. Runs independently of the connect/receive/send loops in
-/// WebSocketConnection, so one slow sweep never blocks normal message handling.
+/// Periodically maintains every live connection: sends a heartbeat, closes any connection that
+/// has gone silent for too long, and extends the Redis TTL of the rooms and reconnect sessions
+/// the remaining connections depend on, so an active room never expires underneath its
+/// participants. Runs independently of the connect/receive/send loops in WebSocketConnection,
+/// so one slow sweep never blocks normal message handling.
 /// </summary>
 public sealed class StaleConnectionSweepService(
     RoomConnectionRegistry connectionRegistry,
+    RoomManager roomManager,
     HeartbeatSettings settings,
     ILogger<StaleConnectionSweepService> logger) : BackgroundService
 {
@@ -25,6 +28,8 @@ public sealed class StaleConnectionSweepService(
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 var now = DateTimeOffset.UtcNow;
+                var activeRoomIds = new HashSet<string>();
+                var activeReconnectTokens = new List<string>();
 
                 foreach (var connection in connectionRegistry.GetAllConnections())
                 {
@@ -38,7 +43,19 @@ public sealed class StaleConnectionSweepService(
                     }
 
                     connection.SendHeartbeat();
+
+                    if (connection.CurrentRoomId is { } roomId)
+                    {
+                        activeRoomIds.Add(roomId);
+                    }
+
+                    if (connection.ReconnectToken is { } reconnectToken)
+                    {
+                        activeReconnectTokens.Add(reconnectToken);
+                    }
                 }
+
+                await roomManager.RefreshActiveStateAsync(activeRoomIds, activeReconnectTokens, stoppingToken);
             }
         }
         catch (OperationCanceledException)

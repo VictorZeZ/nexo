@@ -14,7 +14,8 @@ public sealed class RoomSettings
 
     /// <summary>
     /// How long a room's Redis state (and its chat history) survives without activity before it
-    /// expires automatically. Refreshed on every successful join.
+    /// expires automatically. Refreshed on every successful join, and periodically for as long as
+    /// the room still has a live connection.
     /// </summary>
     public int TimeToLiveMinutes { get; init; } = 60;
 
