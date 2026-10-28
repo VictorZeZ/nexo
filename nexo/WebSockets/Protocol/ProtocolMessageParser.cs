@@ -50,7 +50,7 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
                 ProtocolMessageType.LeaveRoom => ParsePayload<LeaveRoomPayload>(envelope, ValidateLeaveRoom),
                 ProtocolMessageType.ChatMessage => ParsePayload<ChatMessagePayload>(envelope, ValidateChatMessage),
                 ProtocolMessageType.ParticipantSpeakingStateChanged =>
-                    ParsePayload<ParticipantSpeakingStatePayload>(envelope, ValidateSpeakingState),
+                    ParsePayload<ParticipantSpeakingStatePayload>(envelope, _ => null),
                 ProtocolMessageType.HeartbeatAck => ParsePayload<HeartbeatAckPayload>(envelope, _ => null),
                 ProtocolMessageType.WebRtcOffer => ParsePayload<WebRtcOfferPayload>(envelope, ValidateWebRtcOffer),
                 ProtocolMessageType.WebRtcAnswer => ParsePayload<WebRtcAnswerPayload>(envelope, ValidateWebRtcAnswer),
@@ -165,11 +165,6 @@ public sealed class ProtocolMessageParser(ProtocolLimitsSettings limits)
 
         return null;
     }
-
-    private string? ValidateSpeakingState(ParticipantSpeakingStatePayload payload) =>
-        string.IsNullOrWhiteSpace(payload.ParticipantId) || payload.ParticipantId.Length > limits.MaxParticipantIdLength
-            ? "ParticipantId is required and must not exceed the maximum allowed length."
-            : null;
 
     private string? ValidateWebRtcOffer(WebRtcOfferPayload payload)
     {
