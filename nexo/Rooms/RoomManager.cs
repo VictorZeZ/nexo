@@ -35,20 +35,31 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
         return 1
         """;
 
-    // Removes a participant and deletes the room entirely once it becomes empty, rather than
-    // leaving empty room state to rely solely on TTL expiry.
+    // Removes a participant and, once the room becomes empty, deletes all of its state (metadata,
+    // participants, chat history and message-ID set) rather than leaving encrypted history behind
+    // to rely solely on TTL expiry.
     private const string RemoveParticipantScript = """
         local roomKey = KEYS[1]
         local participantsKey = KEYS[2]
+        local historyKey = KEYS[3]
+        local messageIdsKey = KEYS[4]
         local participantId = ARGV[1]
 
         redis.call('SREM', participantsKey, participantId)
         local remaining = redis.call('SCARD', participantsKey)
         if remaining == 0 then
-            redis.call('DEL', roomKey)
-            redis.call('DEL', participantsKey)
+            redis.call('DEL', roomKey, participantsKey, historyKey, messageIdsKey)
         end
         return remaining
+        """;
+
+    // Atomically counts a failed password attempt and starts the window on the first failure.
+    private const string RecordFailedJoinScript = """
+        local count = redis.call('INCR', KEYS[1])
+        if count == 1 then
+            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))
+        end
+        return count
         """;
 
     /// <summary>
@@ -133,10 +144,13 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
 
             // An already-verified member (e.g. resuming a session) never needs to re-supply a
             // private room's password; the session token itself is the credential at that point.
-            if (!isAlreadyMember && room.Visibility == RoomVisibility.Private &&
-                (string.IsNullOrEmpty(password) || room.PasswordHash is null || !RoomPasswordHasher.Verify(password, room.PasswordHash)))
+            if (!isAlreadyMember && room.Visibility == RoomVisibility.Private)
             {
-                return RoomJoinResult.Failed(RoomJoinOutcome.InvalidPassword);
+                var passwordFailure = await CheckPrivateRoomPasswordAsync(database, roomId, room, password);
+                if (passwordFailure is { } failureOutcome)
+                {
+                    return RoomJoinResult.Failed(failureOutcome);
+                }
             }
         }
         catch (RedisConnectionException ex)
@@ -170,18 +184,59 @@ public sealed class RoomManager(IConnectionMultiplexer redis, RoomSettings setti
     }
 
     /// <summary>
-    /// Removes a participant from a room (deleting the room if it becomes empty) and invalidates
-    /// their reconnect token, so a participant who has left cannot resume into the room later.
+    /// Verifies a private room's password while enforcing the failed-attempt cap. Returns null when
+    /// the password is correct, otherwise the outcome to report. The cap is read before hashing and
+    /// incremented only on a wrong password, so attempts already in flight when it is reached can
+    /// overshoot it slightly; every later attempt in the window is rejected without being hashed.
+    /// </summary>
+    private async Task<RoomJoinOutcome?> CheckPrivateRoomPasswordAsync(IDatabase database, string roomId, RoomRecord room, string? password)
+    {
+        // A missing password is rejected without hashing and without counting as a failed attempt,
+        // so it cannot be used to lock legitimate joiners out of the room.
+        if (string.IsNullOrEmpty(password) || room.PasswordHash is null)
+        {
+            return RoomJoinOutcome.InvalidPassword;
+        }
+
+        var failedJoinsKey = RedisKeys.RoomFailedJoins(roomId);
+
+        var recordedFailures = await database.StringGetAsync(failedJoinsKey);
+        var failedAttempts = recordedFailures.HasValue ? (long)recordedFailures : 0;
+        if (failedAttempts >= settings.MaxFailedJoinAttempts)
+        {
+            logger.LogWarning("Room {RoomId} has reached its failed password attempt limit.", roomId);
+            return RoomJoinOutcome.TooManyAttempts;
+        }
+
+        if (RoomPasswordHasher.Verify(password, room.PasswordHash))
+        {
+            return null;
+        }
+
+        await database.ScriptEvaluateAsync(RecordFailedJoinScript, [failedJoinsKey], [settings.FailedJoinWindowSeconds]);
+        return RoomJoinOutcome.InvalidPassword;
+    }
+
+    /// <summary>
+    /// Removes a participant from a room (deleting all room state if it becomes empty) and
+    /// invalidates their reconnect token, so a participant who has left cannot resume into the
+    /// room later.
     /// </summary>
     public async Task<bool> LeaveRoomAsync(string roomId, string participantId, string? reconnectToken, CancellationToken cancellationToken)
     {
         var database = redis.GetDatabase();
-        var roomKey = RedisKeys.Room(roomId);
-        var participantsKey = RedisKeys.RoomParticipants(roomId);
 
         try
         {
-            await database.ScriptEvaluateAsync(RemoveParticipantScript, [roomKey, participantsKey], [participantId]);
+            await database.ScriptEvaluateAsync(
+                RemoveParticipantScript,
+                [
+                    RedisKeys.Room(roomId),
+                    RedisKeys.RoomParticipants(roomId),
+                    RedisKeys.RoomHistory(roomId),
+                    RedisKeys.RoomMessageIds(roomId)
+                ],
+                [participantId]);
         }
         catch (RedisConnectionException ex)
         {

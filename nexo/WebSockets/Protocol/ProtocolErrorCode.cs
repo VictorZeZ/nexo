@@ -20,4 +20,5 @@ public enum ProtocolErrorCode
     SessionExpired = 12,
     PeerNotFound = 13,
     RoomCreationLimitExceeded = 14,
+    TooManyJoinAttempts = 15,
 }

@@ -37,4 +37,16 @@ public sealed class RoomSettings
     /// mass room creation; combined with per-IP connection and message-rate limits.
     /// </summary>
     public int MaxRoomsCreatedPerConnection { get; init; } = 10;
+
+    /// <summary>
+    /// Maximum number of wrong passwords accepted for one private room within
+    /// <see cref="FailedJoinWindowSeconds"/>, counted across all connections and IP addresses.
+    /// Once reached, further password attempts are rejected without being checked, which caps
+    /// brute-force guessing and the CPU cost of password hashing. While a room is locked out,
+    /// existing members and resuming participants are unaffected.
+    /// </summary>
+    public int MaxFailedJoinAttempts { get; init; } = 10;
+
+    /// <summary>Length of the failed-attempt window, in seconds, counted from the first failure.</summary>
+    public int FailedJoinWindowSeconds { get; init; } = 600;
 }

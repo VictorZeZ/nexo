@@ -244,6 +244,7 @@ public sealed class RoomMessageHandler(
             {
                 RoomJoinOutcome.RoomNotFound => ProtocolErrorCode.RoomNotFound,
                 RoomJoinOutcome.InvalidPassword => ProtocolErrorCode.InvalidRoomPassword,
+                RoomJoinOutcome.TooManyAttempts => ProtocolErrorCode.TooManyJoinAttempts,
                 RoomJoinOutcome.RoomFull => ProtocolErrorCode.RoomFull,
                 RoomJoinOutcome.TemporarilyUnavailable => ProtocolErrorCode.RoomTemporarilyUnavailable,
                 _ => ProtocolErrorCode.InvalidPayload

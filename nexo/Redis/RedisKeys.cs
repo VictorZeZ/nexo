@@ -12,6 +12,7 @@ public static class RedisKeys
     public static string RoomHistory(string roomId) => $"room:{roomId}:history";
 
     public static string RoomMessageIds(string roomId) => $"room:{roomId}:messageIds";
+    public static string RoomFailedJoins(string roomId) => $"room:{roomId}:failedJoins";
 
     public static string Session(string reconnectToken) => $"session:{reconnectToken}";
 }
