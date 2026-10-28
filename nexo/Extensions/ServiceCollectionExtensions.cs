@@ -138,7 +138,7 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Registers structural limits and transport settings for the WebSocket connection layer,
-    /// plus the per-IP concurrent connection limiter.
+    /// plus the per-IP concurrent connection limiter and the registry of all live connections.
     /// </summary>
     public static IServiceCollection AddNexoWebSocketConnections(this IServiceCollection services, IConfiguration configuration)
     {
@@ -147,6 +147,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(settings);
         services.AddSingleton<IpConnectionLimiter>();
+        services.AddSingleton<ConnectionRegistry>();
 
         return services;
     }

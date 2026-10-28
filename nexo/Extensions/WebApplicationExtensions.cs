@@ -40,9 +40,9 @@ public static class WebApplicationExtensions
     /// <summary>
     /// Maps the WebSocket upgrade endpoint. Validates the Origin header (when present) against
     /// the configured CORS allow-list and enforces a per-IP concurrent connection cap before
-    /// accepting the socket. Each accepted connection is handed off to a
-    /// <see cref="WebSocketConnection"/>, wired to <see cref="RoomMessageHandler"/> for both
-    /// message dispatch and cleanup on disconnect.
+    /// accepting the socket. Each accepted connection is tracked for health monitoring, then
+    /// handed off to a <see cref="WebSocketConnection"/>, wired to <see cref="RoomMessageHandler"/>
+    /// for both message dispatch and cleanup on disconnect.
     /// </summary>
     public static WebApplication MapNexoWebSocketEndpoint(this WebApplication app)
     {
@@ -53,6 +53,7 @@ public static class WebApplicationExtensions
             WebSocketConnectionSettings settings,
             CorsSettings corsSettings,
             IpConnectionLimiter connectionLimiter,
+            ConnectionRegistry connectionRegistry,
             ILoggerFactory loggerFactory) =>
         {
             if (!context.WebSockets.IsWebSocketRequest)
@@ -92,7 +93,16 @@ public static class WebApplicationExtensions
 
                 connection.OnClosedAsync = roomMessageHandler.HandleDisconnectedAsync;
 
-                await connection.RunAsync(context.RequestAborted);
+                connectionRegistry.Add(connection);
+
+                try
+                {
+                    await connection.RunAsync(context.RequestAborted);
+                }
+                finally
+                {
+                    connectionRegistry.Remove(connection);
+                }
             }
             finally
             {

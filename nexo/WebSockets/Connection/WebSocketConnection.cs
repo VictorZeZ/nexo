@@ -313,7 +313,10 @@ public sealed class WebSocketConnection : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         ArrayPool<byte>.Shared.Return(_receiveBuffer);
-        _connectionCts.Dispose();
+
+        // _connectionCts is intentionally not disposed: it holds no timer or unmanaged resource, and the
+        // stale-connection sweep may still hold a reference to a connection that has just closed and
+        // call Cancel() on it, which would throw ObjectDisposedException on a disposed source.
         await _messageRateLimiter.DisposeAsync();
     }
 }
