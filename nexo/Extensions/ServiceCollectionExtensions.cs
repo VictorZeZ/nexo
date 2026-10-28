@@ -1,4 +1,5 @@
-﻿using nexo.BackgroundServices;
+﻿using Microsoft.AspNetCore.HttpOverrides;
+using nexo.BackgroundServices;
 using nexo.Middleware;
 using nexo.Options;
 using nexo.Rooms;
@@ -7,6 +8,7 @@ using nexo.WebSockets.Connection;
 using nexo.WebSockets.Handlers;
 using nexo.WebSockets.Protocol;
 using StackExchange.Redis;
+using System.Net;
 using System.Threading.RateLimiting;
 
 namespace nexo.Extensions;
@@ -62,6 +64,56 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers trusted-proxy handling for X-Forwarded-For and X-Forwarded-Proto, so rate limiting
+    /// and connection caps see the real client IP behind a reverse proxy. Does nothing unless trusted
+    /// proxies are configured: an empty trust list would make the middleware trust every sender.
+    /// </summary>
+    public static IServiceCollection AddNexoForwardedHeaders(this IServiceCollection services, IConfiguration configuration)
+    {
+        var settings = configuration.GetSection(ForwardedHeadersSettings.SectionName).Get<ForwardedHeadersSettings>()
+            ?? new ForwardedHeadersSettings();
+
+        services.AddSingleton(settings);
+
+        if (!settings.IsConfigured)
+        {
+            return services;
+        }
+
+        services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = settings.ForwardLimit;
+
+            // Replace the loopback-only defaults with exactly the configured proxies.
+            options.KnownProxies.Clear();
+            options.KnownIPNetworks.Clear();
+
+            foreach (var proxy in settings.KnownProxies)
+            {
+                if (!IPAddress.TryParse(proxy, out var address))
+                {
+                    throw new InvalidOperationException($"ForwardedHeaders:KnownProxies contains an invalid IP address: '{proxy}'.");
+                }
+
+                options.KnownProxies.Add(address);
+            }
+
+            foreach (var network in settings.KnownNetworks)
+            {
+                if (!System.Net.IPNetwork.TryParse(network, out var parsedNetwork))
+                {
+                    throw new InvalidOperationException($"ForwardedHeaders:KnownNetworks contains an invalid CIDR network: '{network}'.");
+                }
+
+                options.KnownIPNetworks.Add(parsedNetwork);
+            }
+        });
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers a global, fixed-window rate limiter partitioned per client IP address.
     /// </summary>
     public static IServiceCollection AddNexoRateLimiting(this IServiceCollection services, IConfiguration configuration)
@@ -100,6 +152,12 @@ public static class ServiceCollectionExtensions
     {
         var redisSettings = configuration.GetSection(RedisSettings.SectionName).Get<RedisSettings>()
             ?? new RedisSettings();
+
+        if (string.IsNullOrWhiteSpace(redisSettings.ConnectionString))
+        {
+            throw new InvalidOperationException(
+                "Redis:ConnectionString is not configured. Supply it through the Redis__ConnectionString environment variable or user secrets.");
+        }
 
         services.AddSingleton<IConnectionMultiplexer>(serviceProvider =>
         {

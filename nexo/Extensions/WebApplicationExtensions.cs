@@ -15,6 +15,13 @@ public static class WebApplicationExtensions
         // Must run first so it can catch exceptions from everything downstream.
         app.UseExceptionHandler();
 
+        // Must run before anything that reads the client IP or request scheme (HTTPS redirection,
+        // rate limiting, the WebSocket per-IP cap). Only enabled when trusted proxies are configured.
+        if (app.Services.GetRequiredService<ForwardedHeadersSettings>().IsConfigured)
+        {
+            app.UseForwardedHeaders();
+        }
+
         if (!app.Environment.IsDevelopment())
         {
             app.UseHsts();
